@@ -126,8 +126,8 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
-var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v3';
+var API_URL = '';
+var VERSION = 'v4';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, claveColegio:'colegio2026', claveABT:'abt2026'};
@@ -342,17 +342,24 @@ var MOCK = (function(){
 })();
 
 /* ---------- Comunicación (JSONP por GET: anda en Safari) ---------- */
-function api(action, p){
+function api(action, p, reintento){
   if (!API_URL) return new Promise(function(res){ setTimeout(function(){
     try { res(JSON.parse(JSON.stringify(core_handle(action, p || {}, MOCK, ahoraLocal())))); }
     catch (e) { res({ok:false, error:e.message}); }
   }, 120); });
   return new Promise(function(res){
-    var cb = 'cb' + Math.random().toString(36).slice(2), s = document.createElement('script');
-    var to = setTimeout(function(){ fin({ok:false, error:'El servidor no respondió. Revisá la conexión y probá de nuevo.'}); }, 25000);
-    function fin(r){ clearTimeout(to); try { delete window[cb]; } catch(e){ window[cb] = undefined; } s.remove(); res(r); }
+    var cb = 'cb' + Math.random().toString(36).slice(2), s = document.createElement('script'), listo = false;
+    var to = setTimeout(function(){ fin({ok:false, red:true, error:'El servidor tardó demasiado en responder.'}); }, 30000);
+    function fin(r){
+      if (listo) return; listo = true; clearTimeout(to);
+      window[cb] = function(){}; s.remove();
+      /* Un corte de red suelto no es un error: se reintenta solo una vez (salvo al crear una tira, para no duplicarla). */
+      if (r.red && !reintento && !(action === 'guardarTira' && !(p && p.tira && p.tira.id)))
+        return setTimeout(function(){ api(action, p, true).then(res); }, 2000);
+      res(r);
+    }
     window[cb] = fin;
-    s.onerror = function(){ fin({ok:false, error:'No se pudo conectar con el servidor.'}); };
+    s.onerror = function(){ fin({ok:false, red:true, error:'No se pudo conectar con el servidor. Revisá la conexión y probá de nuevo.'}); };
     s.src = API_URL + '?action=' + action + '&p=' + encodeURIComponent(JSON.stringify(p || {})) + '&cb=' + cb + '&_=' + Date.now();
     document.body.appendChild(s);
   });
@@ -387,16 +394,22 @@ var tt;
 function toast(m, err){ var el = $('#toast'); el.textContent = m; el.className = 'on' + (err ? ' err' : ''); clearTimeout(tt); tt = setTimeout(function(){ el.className = ''; }, err ? 4200 : 2200); }
 
 /* ---------- Navegación y carga ---------- */
-async function cargar(){
+async function cargar(silencioso){
   var r = await api('estado', {finde:S.finde});
-  if (!r.ok){ toast(r.error, true); if (!S.cfg) $('#main').innerHTML = '<p class="vacio">No se pudo cargar el cronograma. ' + esc(r.error) + '</p>'; return; }
-  S.cfg = r.config; S.tiras = r.tiras; S.ahora = r.ahora; render();
+  if (!r.ok){
+    S.offline = !!r.red;
+    if (silencioso && S.cfg){ render(); return; }   /* refresco automático: sin cartel, se sigue mostrando lo último */
+    toast(r.error, true);
+    if (!S.cfg) $('#main').innerHTML = '<p class="vacio">No se pudo cargar el cronograma. ' + esc(r.error) + ' <button class="btn sec chico" onclick="cargar()">Reintentar</button></p>';
+    return;
+  }
+  S.offline = false; S.cfg = r.config; S.tiras = r.tiras; S.ahora = r.ahora; render();
 }
 function irTab(t){ S.tab = t; S.edit = null; S.borrar = null; render(); window.scrollTo(0,0); }
 function moverFinde(n){ S.finde = addDias(S.finde, 7*n); S.edit = null; S.borrar = null; $('#tfinde').textContent = tituloFinde(S.finde); cargar(); }
 function salir(k){ S[k] = null; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); }
 function render(){
-  $('#ver').textContent = VERSION;
+  $('#ver').textContent = VERSION + (S.offline ? ' · sin conexión' : '');
   $('#tfinde').textContent = tituloFinde(S.finde);
   $('#demo').innerHTML = API_URL ? '' : '<div class="demo">Modo demo: los cambios no se guardan. Clave ABT abt2026, Colegio colegio2026, PIN de clubes 1111 a 5555.</div>';
   document.querySelectorAll('nav.tabs button').forEach(function(b){ b.classList.toggle('on', b.dataset.tab === S.tab); });
@@ -648,8 +661,8 @@ async function guardarCfg(parte){
 
 /* ---------- Arranque y actualización en vivo ---------- */
 render(); cargar();
-setInterval(function(){ if (!document.hidden && !S.edit && (S.tab === 'cartelera' || S.tab === 'colegio')) cargar(); }, 60000);
-document.addEventListener('visibilitychange', function(){ if (!document.hidden && !S.edit) cargar(); });
+setInterval(function(){ if (!document.hidden && !S.edit && (S.tab === 'cartelera' || S.tab === 'colegio')) cargar(true); }, 60000);
+document.addEventListener('visibilitychange', function(){ if (!document.hidden && !S.edit) setTimeout(function(){ cargar(true); }, 1500); });
 </script>
 </body>
 </html>
