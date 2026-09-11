@@ -129,7 +129,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v6';
+var VERSION = 'v7';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, claveColegio:'colegio2026', claveABT:'abt2026'};
@@ -284,7 +284,6 @@ function guardarTira_(p, S, cfg, P, ahora, c){
   var partidos = ps.map(function(x){
     if (!cats[x.cat]) err('Hay un partido sin categoría.');
     if (!/^\d{2}:\d{2}$/.test(x.hora || '')) err('Falta la hora de ' + cats[x.cat] + '.');
-    if (!esFinde(t.fecha) && !esLibre(cfg, x.cat)) err(cats[x.cat] + ' es formativa: solo se juega sábado o domingo.');
     var o = x.id && old[x.id];
     return {id: o ? o.id : uid(), cat:x.cat, hora:x.hora, a1: o ? o.a1 : '', a2: o ? o.a2 : ''};
   });
@@ -523,26 +522,25 @@ function todasCats(){
   e.partidos = e.partidos.filter(function(x){ return x.cat; });
   e.partidos.forEach(function(x){ ya[x.cat] = 1; });
   var antes = e.partidos.length;
-  S.cfg.categorias.forEach(function(k){ if (!ya[k.id] && (esFinde(e.fecha) || k.libre)) e.partidos.push({cat:k.id, hora:''}); });
-  if (e.partidos.length === antes) toast(esFinde(e.fecha) ? 'Ya están todas las categorías.' : 'No hay categorías habilitadas para entre semana.', true);
+  S.cfg.categorias.forEach(function(k){ if (!ya[k.id]) e.partidos.push({cat:k.id, hora:''}); });
+  if (e.partidos.length === antes) toast('Ya están todas las categorías.', true);
   if (!e.partidos.length) e.partidos.push({cat:'', hora:''});
   render();
 }
 function vEditor(){
   var e = S.edit, dias = [-5, -4, -3, -2, -1, 0, 1].map(function(n){ return addDias(S.finde, n); }), hoy = S.ahora.slice(0,10);
-  var hayFormativa = e.partidos.some(function(x){ return x.cat && !esLibre(S.cfg, x.cat); });
-  var cats = S.cfg.categorias.filter(function(k){ return esFinde(e.fecha) || k.libre; });
+  var cats = S.cfg.categorias;
   var riv = S.cfg.clubes.filter(function(c){ return c.id !== S.club.id; });
   return '<section class="panel"><h2>' + (e.id ? 'Editar tira' : 'Nueva tira de local') + '</h2>' +
-    '<label>Día<select onchange="S.edit.fecha=this.value;render()">' + dias.map(function(d){ var no = d < hoy || (!esFinde(d) && hayFormativa); return '<option value="' + d + '"' + (d === e.fecha ? ' selected' : '') + (no ? ' disabled' : '') + '>' + fechaLarga(d) + (esFinde(d) ? '' : ' (entre semana)') + '</option>'; }).join('') + '</select></label>' +
-    '<p class="nota" style="margin:-4px 0 12px">' + (esFinde(e.fecha) ? 'Sábado y domingo se cargan todas las categorías.' : 'Entre semana solo van las categorías que la ABT habilitó para cualquier día, como Primera. Las formativas se juegan sábado o domingo.') + '</p>' +
+    '<label>Día<select onchange="S.edit.fecha=this.value;render()">' + dias.map(function(d){ var no = d < hoy; return '<option value="' + d + '"' + (d === e.fecha ? ' selected' : '') + (no ? ' disabled' : '') + '>' + fechaLarga(d) + (esFinde(d) ? '' : ' (entre semana)') + '</option>'; }).join('') + '</select></label>' +
+    (esFinde(e.fecha) ? '' : '<p class="nota" style="margin:-4px 0 12px">Partido entre semana. La carga cierra ' + (Number(P().anticipacionHoras) || 0) + ' hs antes del primer partido.</p>') +
     '<label>Rival<select onchange="elegirRival(this.value)"><option value="">Elegí el rival</option>' +
       riv.map(function(c){ return '<option value="' + c.id + '"' + (e.rivalId === c.id ? ' selected' : '') + '>' + esc(c.nombre) + '</option>'; }).join('') +
       '<option value="__otro"' + (e.otro ? ' selected' : '') + '>Otro club (de afuera de la ABT)</option></select></label>' +
     (e.otro ? '<label>Nombre del rival<input value="' + esc(e.rivalTxt) + '" oninput="S.edit.rivalTxt=this.value"></label>' : '') +
     '<label>Sede o cancha<input value="' + esc(e.sede) + '" oninput="S.edit.sede=this.value"></label>' +
     '<h3 class="mini">Partidos de la tira</h3>' +
-    (cats.length ? '' : '<p class="vacio" style="margin:0 0 10px">Ninguna categoría está habilitada para jugar entre semana. Elegí sábado o domingo, o pedile a la ABT que tilde "Se juega cualquier día" en Primera.</p>') +
+
     e.partidos.map(function(x, i){
       return '<div class="pfila"><select aria-label="Categoría" onchange="S.edit.partidos[' + i + '].cat=this.value;render()"><option value="">Categoría</option>' +
         cats.map(function(k){ return '<option value="' + k.id + '"' + (k.id === x.cat ? ' selected' : '') + '>' + esc(k.nombre) + '</option>'; }).join('') +
@@ -663,7 +661,7 @@ function vABT(){
   var p = S.abt.cfg.params, set = function(k){ return ' oninput="S.abt.cfg.params.' + k + '=this.value"'; };
   return '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
     seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text']], 'Cada club entra a Mi club con su PIN.', 'Agregar club') +
-    seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number'],['libre','Se juega cualquier día','checkbox']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Las que no tengan tildado "cualquier día" son formativas y solo se cargan sábado o domingo.', 'Agregar categoría') +
+    seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Cualquier categoría se puede cargar cualquier día de la semana.', 'Agregar categoría') +
     seccion('arbitros', 'Árbitros', [['nombre','Nombre','text'],['tel','WhatsApp','tel','2494123456']], 'Teléfono con código de área, sin 0 ni 15, para mandarle sus designaciones.', 'Agregar árbitro') +
     '<section class="panel"><h2>Reglas y claves</h2>' +
     '<label>Árbitros por partido<input type="number" inputmode="numeric" value="' + p.arbitrosPorPartido + '"' + set('arbitrosPorPartido') + '></label>' +
