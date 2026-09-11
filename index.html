@@ -129,7 +129,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v5';
+var VERSION = 'v6';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, claveColegio:'colegio2026', claveABT:'abt2026'};
@@ -522,7 +522,10 @@ function todasCats(){
   var e = S.edit, ya = {};
   e.partidos = e.partidos.filter(function(x){ return x.cat; });
   e.partidos.forEach(function(x){ ya[x.cat] = 1; });
+  var antes = e.partidos.length;
   S.cfg.categorias.forEach(function(k){ if (!ya[k.id] && (esFinde(e.fecha) || k.libre)) e.partidos.push({cat:k.id, hora:''}); });
+  if (e.partidos.length === antes) toast(esFinde(e.fecha) ? 'Ya están todas las categorías.' : 'No hay categorías habilitadas para entre semana.', true);
+  if (!e.partidos.length) e.partidos.push({cat:'', hora:''});
   render();
 }
 function vEditor(){
@@ -539,6 +542,7 @@ function vEditor(){
     (e.otro ? '<label>Nombre del rival<input value="' + esc(e.rivalTxt) + '" oninput="S.edit.rivalTxt=this.value"></label>' : '') +
     '<label>Sede o cancha<input value="' + esc(e.sede) + '" oninput="S.edit.sede=this.value"></label>' +
     '<h3 class="mini">Partidos de la tira</h3>' +
+    (cats.length ? '' : '<p class="vacio" style="margin:0 0 10px">Ninguna categoría está habilitada para jugar entre semana. Elegí sábado o domingo, o pedile a la ABT que tilde "Se juega cualquier día" en Primera.</p>') +
     e.partidos.map(function(x, i){
       return '<div class="pfila"><select aria-label="Categoría" onchange="S.edit.partidos[' + i + '].cat=this.value;render()"><option value="">Categoría</option>' +
         cats.map(function(k){ return '<option value="' + k.id + '"' + (k.id === x.cat ? ' selected' : '') + '>' + esc(k.nombre) + '</option>'; }).join('') +
