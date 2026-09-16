@@ -109,6 +109,14 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 .cal{background:#fff;border:1px solid var(--linea);border-left:5px solid #1B6E7D;border-radius:10px;padding:14px;margin-bottom:14px}
 .cal h3{margin:0 0 4px;font:700 19px var(--cond);color:#14606D}
 .cal .link{font-size:12px;color:var(--gris);word-break:break-all;background:#F6F8FA;border-radius:6px;padding:7px 9px;margin:9px 0 0}
+.disc{background:#fff;border:1px solid var(--linea);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.disc-cab{padding:11px 14px 8px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.disc-cab h4{margin:0;font:700 17px var(--cond);flex:1}
+.disc-cuerpo{padding:0 14px 12px;font-size:14px;line-height:1.55;color:var(--tinta)}
+.disc-meta{font-size:13px;color:var(--gris);margin-bottom:5px}
+.badge{display:inline-block;font:700 12px Barlow,system-ui,sans-serif;padding:3px 9px;border-radius:20px;margin-left:6px}
+.badge.pend{background:#FFF3CD;color:#856404}
+.badge.res{background:#D4EDDA;color:#155724}
 .btn.cal1{background:#1B6E7D;border-color:#1B6E7D}
 .btn.cal2{background:#fff;color:#1B6E7D;border-color:#1B6E7D}
 .evento .cat .vs{font-weight:400;color:var(--gris);font-size:14px}
@@ -145,7 +153,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v14';
+var VERSION = 'v15';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
@@ -527,7 +535,7 @@ function guardarConfig_(p, S, cfg, esABT){
 var DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 function ahoraLocal(){ var d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
-var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:''};
+var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null};
 
 /* ---------- Modo demo: mismo núcleo que el servidor, datos en memoria ---------- */
 var MOCK = (function(){
@@ -548,6 +556,10 @@ var MOCK = (function(){
     setConfig:function(k, v){ cfg[k] = clone(v); },
     getTiras:function(f){ return tiras.filter(function(x){ return !f || x.finde === f; }).map(clone); },
     getTira:function(id){ return clone(tiras.filter(function(x){ return x.id === id; })[0]); },
+    _disc:[],
+    getDisciplina:function(){ return this._disc.slice().sort(function(a,b){ return String(b.act||b.fecha).localeCompare(String(a.act||a.fecha)); }); },
+    putDisciplina:function(n){ var i=this._disc.findIndex(function(d){ return d.id===n.id; }); if(i>=0)this._disc[i]=n; else this._disc.push(n); },
+    delDisciplina:function(id){ this._disc=this._disc.filter(function(d){ return d.id!==id; }); },
     putTira:function(x){ var i = tiras.findIndex(function(k){ return k.id === x.id; }); if (i >= 0) tiras[i] = clone(x); else tiras.push(clone(x)); },
     delTira:function(id){ tiras = tiras.filter(function(k){ return k.id !== id; }); }
   };
@@ -629,6 +641,22 @@ async function copiar(txt){
 }
 
 /* ---------- Vista de invitado: alguien abrió un link de tira ---------- */
+async function cargarDisc(){
+  if (!S.club) return;
+  var r = await api('disciplina', {club:S.club.id, pin:S.club.pin});
+  if (r.ok){ S.disc = r.notifs; render(); }
+}
+async function cargarDiscABT(){
+  if (!S.abt) return;
+  var r = await api('disciplina', {clave:S.abt.clave, solo:'leer'});
+  if (r.ok){ S.discABT = r.notifs; render(); }
+}
+async function cargarAvisos(){
+  if (!S.club && !S.colegio && !S.abt) return;
+  var p2 = S.club ? {club:S.club.id, pin:S.club.pin} : {clave:S.colegio || (S.abt && S.abt.clave)};
+  var r = await api('avisos', p2);
+  if (r.ok){ S.avisos = r.sinArbitros; render(); }
+}
 async function cargarInvitado(){
   var q = S.invQ, r = q.t ? await api('tira', {id:q.t}) : await api('semana', {club:q.c, finde:q.s, cat:q.k || ''});
   S.inv = r.ok ? r : {error:r.error};
@@ -673,10 +701,16 @@ async function cargar(silencioso){
     return;
   }
   S.offline = false; S.cfg = r.config; S.tiras = r.tiras; S.ahora = r.ahora; render();
+  if (S.club) cargarDisc();
+  if (S.abt) cargarDiscABT();
+  cargarAvisos();
 }
 function irTab(t){ S.tab = t; S.edit = null; S.borrar = null; render(); window.scrollTo(0,0); }
 function moverFinde(n){ S.finde = addDias(S.finde, 7*n); S.edit = null; S.borrar = null; $('#tfinde').textContent = tituloFinde(S.finde); cargar(); }
-function salir(k){ S[k] = null; S.verPin = false; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); }
+function salir(k){ S[k] = null; S.verPin = false; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); 
+  if (k === 'abt'){ S.discABT = null; S.discEd = null; }
+  S.disc = null;
+}
 function render(){
   $('#ver').textContent = VERSION + (S.offline ? ' · sin conexión' : '');
   $('#tfinde').textContent = tituloFinde(S.finde);
@@ -695,8 +729,7 @@ function tiraHTML(t, o){
     return '<div class="fila"><div class="hora">' + x.hora + '</div><div><div class="cat">' + esc(catNom(x.cat)) + '</div><div class="arb">' + esc(arbTxt(x)) + '</div></div>' +
       (o.costos ? '<div class="costo">' + plata(costo(x)) + '</div>' : '<div></div>') + '</div>';
   }).join('');
-  var pie = o.pie != null ? o.pie : '<span>Paga ' + esc(clubNom(t.local)) + ' (local)</span><span class="acciones">' +
-    '<span class="monto">' + plata(totalTira(t, S.cfg, P())) + '</span>' +
+  var pie = o.pie != null ? o.pie : '<span class="acciones">' +
     '<a class="btn cal2 chico" target="_blank" rel="noopener" href="https://wa.me/?text=' +
       encodeURIComponent(titulo(t) + ' – ' + fechaLarga(t.fecha) + '\n' + t.sede + '\nAgregá los partidos a tu calendario: ' + linkTira(t.id)) + '">Calendario</a></span>';
   return '<article class="tira"><div class="tira-cab"><h3>' + esc(titulo(t)) + '</h3><div class="sub">' + esc(t.sede) + '</div></div>' + filas + (pie ? '<div class="pie">' + pie + '</div>' : '') + '</article>';
@@ -768,7 +801,7 @@ function vClub(){
       (ed ? '<span class="acciones"><button class="btn sec chico" onclick="editarTira(\'' + t.id + '\')">Editar</button><button class="btn chico ' + (S.borrar === t.id ? 'peligro' : 'sec') + '" onclick="borrarTira(\'' + t.id + '\')">' + (S.borrar === t.id ? 'Tocá de nuevo para borrar' : 'Borrar') + '</button></span>' : '');
     return tiraHTML(t, {costos:true, pie:pie});
   }).join('') : '<p class="vacio">No hay tiras de local cargadas para esta semana.</p>';
-  h += calendariosHTML(c) + pinHTML();
+  h += calendariosHTML(c) + pinHTML() + disciplinaClubHTML(c);
   if (vis.length) h += '<h2 class="dia">De visitante</h2>' + vis.map(function(t){ return tiraHTML(t, {pie:'<span>Paga el local</span>'}); }).join('');
   return h;
 }
@@ -802,6 +835,17 @@ function semanalHTML(club, cat, nom){
       '<a class="btn sec" target="_blank" rel="noopener" href="' + esc(url) + '">Ver cómo queda</a></div>'
       : '<p class="nota" style="margin:0">No hay partidos cargados para esta semana' + (cat ? ' en ' + esc(catNom(cat)) : '') + '. Cargalos primero o cambiá de semana con las flechas de arriba.</p>') + '</section>';
 }
+function disciplinaClubHTML(club){
+  if (!S.disc) return '';
+  var L = (S.disc || []).filter(function(n){ return (n.clubes || []).indexOf(club) >= 0; });
+  if (!L.length) return '<h2 class="dia">Tribunal de Disciplina</h2><p class="vacio">No hay notificaciones de disciplina para tu club.</p>';
+  return '<h2 class="dia">Tribunal de Disciplina</h2>' + L.map(function(n){
+    return '<div class="disc"><div class="disc-cab"><h4>' + esc(n.texto.slice(0,60)) + (n.texto.length>60?'…':'') +
+      '<span class="badge ' + (n.estado==='resuelto'?'res':'pend') + '">' + (n.estado==='resuelto'?'Resuelto':'Pendiente') + '</span></h4></div>' +
+      '<div class="disc-cuerpo"><div class="disc-meta">Infracción: ' + fechaLarga(n.fecha) + ' · Notificado: ' + fechaLarga(n.act.slice(0,10)) + '</div>' +
+      esc(n.texto) + '</div></div>';
+  }).join('');
+}
 function pinHTML(){
   if (!S.verPin) return '<div class="fila-btn" style="margin:16px 0 8px"><button class="btn sec chico" onclick="S.verPin=true;render()">Cambiar el PIN del club</button></div>';
   return '<section class="panel" style="margin-top:16px"><h2>Cambiar el PIN del club</h2>' +
@@ -827,7 +871,7 @@ async function entrarClub(){
   if (!pin) return toast('Escribí el PIN del club.', true);
   var r = await api('loginClub', {club:id, pin:pin});
   if (!r.ok) return toast(r.error, true);
-  S.club = {id:id, pin:pin}; render();
+  S.club = {id:id, pin:pin}; render(); cargarAvisos(); cargarDisc();
 }
 function nuevaTira(){
   var c = buscar(S.cfg.clubes, S.club.id), T = S.cfg.torneos || [];
@@ -1080,7 +1124,7 @@ function bajarCSV(){
 async function entrarABT(){
   var k = $('#la').value.trim(); if (!k) return toast('Escribí la clave.', true);
   var r = await api('loginABT', {clave:k}); if (!r.ok) return toast(r.error, true);
-  S.abt = {clave:k, cfg:r.config}; render();
+  S.abt = {clave:k, cfg:r.config}; render(); cargarAvisos(); cargarDiscABT();
 }
 function seccion(parte, tit, campos, nota, alta){
   var L = S.abt.cfg[parte] = S.abt.cfg[parte] || [];
@@ -1118,6 +1162,7 @@ function vABT(){
     '<label>Clave de estadísticas<input value="' + esc(p.claveStats) + '"' + set('claveStats') + '></label>' +
     '<button class="btn" onclick="guardarCfg(\'params\')">Guardar reglas y claves</button>' +
     '<p class="nota">Cada tira cierra en lo que pase primero: el cierre semanal (por ejemplo, jueves 20:00 de esa semana) o las horas de anticipación antes de su primer partido. Así un partido de Primera del martes cierra el lunes.</p></section>';
+  h += vDiscABT();
   return h;
 }
 async function guardarCfg(parte){
@@ -1125,6 +1170,51 @@ async function guardarCfg(parte){
   if (!r.ok) return toast(r.error, true);
   S.abt.cfg = r.config; if (parte === 'params') S.abt.clave = r.config.params.claveABT;
   toast('Cambios guardados'); cargar();
+}
+
+/* ---------- Tribunal de Disciplina ABT ---------- */
+function vDiscABT(){
+  if (!S.abt) return '';
+  var claves = S.cfg.clubes || [], disc = S.discABT || [], ed = S.discEd || null;
+  var h = '<h2 class="dia">Tribunal de Disciplina</h2>';
+  if (!ed){
+    h += '<button class="btn ancho" style="margin-bottom:10px" onclick="S.discEd={id:\'\',clubes:[],texto:\'\',fecha:\'\',estado:\'pendiente\'};render()">Nueva notificación</button>';
+    if (!disc.length) return h + '<p class="vacio">No hay notificaciones cargadas.</p>';
+    return h + disc.map(function(n){
+      var noms = (n.clubes||[]).map(function(id){ var cc=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0]; return cc?cc.nombre:id; }).join(', ');
+      return '<div class="disc"><div class="disc-cab"><h4>' + esc(n.texto.slice(0,60)) + (n.texto.length>60?'…':'') +
+        '<span class="badge ' + (n.estado==='resuelto'?'res':'pend') + '">' + (n.estado==='resuelto'?'Resuelto':'Pendiente') + '</span></h4>' +
+        '<span class="acciones"><button class="btn sec chico" onclick="(function(){ S.discEd=JSON.parse(JSON.stringify((S.discABT||[]).filter(function(x){return x.id===\'' + n.id + '\';} )[0]||{}));render(); })()">Editar</button>' +
+        '<button class="btn chico peligro" onclick="borrarNotifABT(\''+n.id+'\')">Borrar</button></span></div>' +
+        '<div class="disc-cuerpo"><div class="disc-meta">Clubes: ' + esc(noms) + ' · Infracción: ' + fechaLarga(n.fecha) + '</div>' + esc(n.texto) + '</div></div>';
+    }).join('');
+  }
+  h += '<section class="panel"><h2>' + (ed.id ? 'Editar' : 'Nueva notificación') + '</h2>';
+  h += '<label>Clubes destinatarios<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
+    claves.map(function(cc){
+      var tilde = (ed.clubes||[]).indexOf(cc.id) >= 0;
+      return '<label style="display:flex;align-items:center;gap:5px;background:#F6F8FA;border:1px solid var(--linea);border-radius:8px;padding:7px 11px;cursor:pointer;min-height:44px">' +
+        '<input type="checkbox"' + (tilde?' checked':'') + ' onchange="discToggleClub(\''+cc.id+'\')" style="width:18px;height:18px;accent-color:var(--tabla)">' + esc(cc.nombre) + '</label>';
+    }).join('') + '</div></label>';
+  h += '<label>Fecha de la infracción<input type="date" value="' + esc(ed.fecha) + '" onchange="S.discEd.fecha=this.value"></label>';
+  h += '<label>Descripción<textarea rows="5" style="display:block;width:100%;margin-top:4px;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:8px;padding:10px;resize:vertical" oninput="S.discEd.texto=this.value">' + esc(ed.texto) + '</textarea></label>';
+  h += '<label>Estado<select onchange="S.discEd.estado=this.value"><option value="pendiente"' + (ed.estado!=='resuelto'?' selected':'') + '>Pendiente</option><option value="resuelto"' + (ed.estado==='resuelto'?' selected':'') + '>Resuelto</option></select></label>';
+  h += '<div class="fila-btn"><button class="btn" onclick="guardarNotif()">Guardar</button><button class="btn sec" onclick="S.discEd=null;render()">Cancelar</button></div></section>';
+  return h;
+}
+function discToggleClub(id){
+  var arr = S.discEd.clubes = S.discEd.clubes || [];
+  var i = arr.indexOf(id); if (i>=0) arr.splice(i,1); else arr.push(id);
+}
+async function guardarNotif(){
+  var r = await api('disciplina', {clave:S.abt.clave, notif:S.discEd});
+  if (!r.ok) return toast(r.error, true);
+  S.discEd = null; toast('Notificación guardada'); await cargarDiscABT(); render();
+}
+async function borrarNotifABT(id){
+  var r = await api('borrarNotif', {clave:S.abt.clave, id:id});
+  if (!r.ok) return toast(r.error, true);
+  toast('Borrada'); await cargarDiscABT(); render();
 }
 
 /* ---------- Arranque y actualización en vivo ---------- */
