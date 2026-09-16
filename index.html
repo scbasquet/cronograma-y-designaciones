@@ -145,10 +145,10 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v12';
+var VERSION = 'v14';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
-var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
+var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
 var CFG_EJEMPLO = {
   clubes:[
     {id:'ind', nombre:'Independiente', pin:'1111', sede:'Gimnasio Independiente'},
@@ -312,13 +312,29 @@ function agenda_(tit, ev, ahora){
     eventos:ev.map(function(e){ return {fecha:e.fecha, hora:e.hora, cat:e.cat, quien:e.vs, sede:e.sede, desc:e.desc, gcal:gcalDe(e)}; }),
     ics:icsDe(tit, ev, ahora)};
 }
+/* Devuelve los partidos sin árbitros cuyo inicio está en menos de horasAviso horas. */
+function sinArbitros(tiras, ahora, P){
+  var horas = Number(P.horasAviso) || 48, L = [];
+  tiras.forEach(function(t){
+    (t.partidos || []).forEach(function(x){
+      if (x.a1 && x.a2) return;
+      var dtPart = t.fecha + 'T' + x.hora;
+      /* Diferencia en horas como strings locales: evita la conversión UTC de los motores JS. */
+      function minsDt(s){ var p=s.split(/[T:-]/),y=+p[0],mo=+p[1]-1,d=+p[2],h=+p[3]||0,mi=+p[4]||0;
+        return ((((y*12+mo)*31+d)*24+h)*60+mi); }
+      var diffH = (minsDt(dtPart) - minsDt(ahora)) / 60;
+      if (diffH > 0 && diffH <= horas) L.push({tiraId:t.id, partidoId:x.id, local:t.local, rivalId:t.rivalId, rivalTxt:t.rivalTxt, fecha:t.fecha, hora:x.hora, cat:x.cat});
+    });
+  });
+  return L.sort(function(a, b){ return (a.fecha + a.hora).localeCompare(b.fecha + b.hora); });
+}
 function publicCfg(cfg, P){
   return {
     torneos: cfg.torneos || [],
     clubes: (cfg.clubes || []).map(function(c){ return {id:c.id, nombre:c.nombre, sede:c.sede}; }),
     categorias: cfg.categorias || [],
     arbitros: (cfg.arbitros || []).map(function(a){ return {id:a.id, nombre:a.nombre}; }),
-    params: {arbitrosPorPartido:P.arbitrosPorPartido, cierreDia:P.cierreDia, cierreHora:P.cierreHora, minEntrePartidos:P.minEntrePartidos, extraCambioSede:P.extraCambioSede, anticipacionHoras:P.anticipacionHoras}
+    params: {arbitrosPorPartido:P.arbitrosPorPartido, cierreDia:P.cierreDia, cierreHora:P.cierreHora, minEntrePartidos:P.minEntrePartidos, extraCambioSede:P.extraCambioSede, anticipacionHoras:P.anticipacionHoras, horasAviso:P.horasAviso}
   };
 }
 /* Superposiciones: mismo árbitro, mismo día, sin tiempo suficiente entre partidos. */
@@ -372,6 +388,17 @@ function core_handle(action, p, S, ahora){
       var nom = (cb ? cb.nombre : 'ABT Tandil') + (kb ? ' · ' + kb.nombre : '') + ' · Básquet';
       return {ok:true, ics:icsDe(nom, eventosDe(S.getTiras(''), cfg, P, p.club || '', p.cat || ''), ahora)};
     }
+    case 'avisos': {
+      var P2 = paramsDe(cfg), ts = S.getTiras('');
+      if (p.clave){
+        if (!(String(p.clave) === String(P2.claveColegio) || String(p.clave) === String(P2.claveABT))) err('Clave incorrecta.');
+        return {ok:true, sinArbitros:sinArbitros(ts, ahora, P2)};
+      }
+      var cb2 = (cfg.clubes || []).filter(function(k){ return k.id === p.club; })[0];
+      if (!cb2 || String(cb2.pin) !== String(p.pin)) err('PIN incorrecto.');
+      var mias = ts.filter(function(t){ return t.local === p.club || t.rivalId === p.club; });
+      return {ok:true, sinArbitros:sinArbitros(mias, ahora, P2)};
+    }
     case 'estado':
       return {ok:true, config:publicCfg(cfg, P), tiras:S.getTiras(p.finde || ''), ahora:ahora};
     case 'loginClub':
@@ -382,6 +409,20 @@ function core_handle(action, p, S, ahora){
     case 'loginABT':
       if (!esABT(p.clave)) err('Clave incorrecta.');
       return {ok:true, config:cfgABT_(cfg, P)};
+    case 'cambiarPin': {
+      var cp = clubOk(), nv = String(p.nuevo || '').trim(), cf = String(p.confirma || '').trim();
+      if (nv.length < 4) err('El PIN nuevo tiene que tener al menos 4 caracteres.');
+      if (/\s/.test(nv)) err('El PIN no puede tener espacios.');
+      if (nv !== cf) err('Los dos PIN nuevos no coinciden. Escribilos de nuevo.');
+      if (nv === String(p.pin)) err('Ese ya es el PIN actual del club.');
+      if (nv === String(P.claveABT) || nv === String(P.claveColegio) || nv === String(P.claveStats))
+        err('Ese PIN está reservado. Elegí otro.');
+      var lista = (cfg.clubes || []).map(function(k){
+        return k.id === cp.id ? {id:k.id, nombre:k.nombre, pin:nv, sede:k.sede} : k;
+      });
+      S.setConfig('clubes', lista);
+      return {ok:true, pin:nv};
+    }
     case 'guardarTira':
       return guardarTira_(p, S, cfg, P, ahora, clubOk());
     case 'borrarTira': {
@@ -457,7 +498,7 @@ function guardarConfig_(p, S, cfg, esABT){
   if (parte === 'params'){
     var np = {};
     for (var k in DEF_PARAMS) np[k] = (v && v[k] !== undefined && v[k] !== '') ? v[k] : P[k];
-    ['arbitrosPorPartido','cierreDia','minEntrePartidos','extraCambioSede','anticipacionHoras','duracionMin'].forEach(function(k){
+    ['arbitrosPorPartido','cierreDia','minEntrePartidos','extraCambioSede','anticipacionHoras','duracionMin','horasAviso'].forEach(function(k){
       np[k] = Number(np[k]); if (isNaN(np[k]) || np[k] < 0) err('Revisá los números de las reglas.');
     });
     if (!/^\d{2}:\d{2}$/.test(np.cierreHora)) err('La hora de cierre tiene que ser HH:MM.');
@@ -635,7 +676,7 @@ async function cargar(silencioso){
 }
 function irTab(t){ S.tab = t; S.edit = null; S.borrar = null; render(); window.scrollTo(0,0); }
 function moverFinde(n){ S.finde = addDias(S.finde, 7*n); S.edit = null; S.borrar = null; $('#tfinde').textContent = tituloFinde(S.finde); cargar(); }
-function salir(k){ S[k] = null; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); }
+function salir(k){ S[k] = null; S.verPin = false; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); }
 function render(){
   $('#ver').textContent = VERSION + (S.offline ? ' · sin conexión' : '');
   $('#tfinde').textContent = tituloFinde(S.finde);
@@ -674,6 +715,19 @@ function textoWA(ts){
   });
   return L.join('\n');
 }
+function bannerAvisos(ids){
+  var L = (S.avisos || []).filter(function(x){ return !ids || ids.indexOf(x.local) >= 0 || ids.indexOf(x.rivalId) >= 0; });
+  if (!L.length) return '';
+  var nomCat = {}, nomClub = {};
+  (S.cfg.categorias || []).forEach(function(k){ nomCat[k.id] = k.nombre; });
+  (S.cfg.clubes || []).forEach(function(k){ nomClub[k.id] = k.nombre; });
+  function nom(id, txt){ return id ? (nomClub[id] || '?') : txt; }
+  var items = L.map(function(x){
+    return '<li>' + (x.fecha.slice(8,10) + '/' + x.fecha.slice(5,7)) + ' ' + x.hora + ' – ' +
+      esc(nomCat[x.cat] || x.cat) + ' – <strong>' + esc(nom(x.local,'?') + ' vs ' + nom(x.rivalId, x.rivalTxt)) + '</strong></li>';
+  }).join('');
+  return '<div class="aviso-red"><h4>⚠️ ' + L.length + ' partido' + (L.length > 1 ? 's' : '') + ' sin árbitros</h4><ul>' + items + '</ul></div>';
+}
 function avisoInstalar(){
   var ios = /iphone|ipad|ipod/i.test(navigator.userAgent), app = window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
   if (!ios || app || S.sinAviso) return '';
@@ -703,6 +757,7 @@ function vClub(){
   var h = '<div class="cabclub"><div><h2>' + esc(clubNom(c)) + '</h2><p class="sub">' +
     (abierto ? 'Podés cargar y editar hasta el ' + cierreTxt(cierre) + '.' + (Number(P().anticipacionHoras) ? ' Los partidos entre semana, hasta ' + P().anticipacionHoras + ' hs antes.' : '') : 'La carga de esta semana cerró el ' + cierreTxt(cierre) + '.') +
     '</p></div><button class="btn sec chico" onclick="salir(\'club\')">Salir</button></div>';
+  h += bannerAvisos([c]);
   h += '<div class="resumen"><div><span class="sub">A pagar esta semana</span><strong class="monto grande">' + plata(total) + '</strong></div>' +
     (total ? '<div><span class="sub">Pendiente</span><strong class="monto grande">' + plata(pend) + '</strong></div>' : '') + '</div>';
   if (abierto) h += '<button class="btn ancho" onclick="nuevaTira()">Cargar una tira de local</button>';
@@ -713,7 +768,7 @@ function vClub(){
       (ed ? '<span class="acciones"><button class="btn sec chico" onclick="editarTira(\'' + t.id + '\')">Editar</button><button class="btn chico ' + (S.borrar === t.id ? 'peligro' : 'sec') + '" onclick="borrarTira(\'' + t.id + '\')">' + (S.borrar === t.id ? 'Tocá de nuevo para borrar' : 'Borrar') + '</button></span>' : '');
     return tiraHTML(t, {costos:true, pie:pie});
   }).join('') : '<p class="vacio">No hay tiras de local cargadas para esta semana.</p>';
-  h += calendariosHTML(c);
+  h += calendariosHTML(c) + pinHTML();
   if (vis.length) h += '<h2 class="dia">De visitante</h2>' + vis.map(function(t){ return tiraHTML(t, {pie:'<span>Paga el local</span>'}); }).join('');
   return h;
 }
@@ -746,6 +801,26 @@ function semanalHTML(club, cat, nom){
       '<button class="btn cal2" onclick="copiar(' + JSON.stringify(url).replace(/"/g, '&quot;') + ')">Copiar link</button>' +
       '<a class="btn sec" target="_blank" rel="noopener" href="' + esc(url) + '">Ver cómo queda</a></div>'
       : '<p class="nota" style="margin:0">No hay partidos cargados para esta semana' + (cat ? ' en ' + esc(catNom(cat)) : '') + '. Cargalos primero o cambiá de semana con las flechas de arriba.</p>') + '</section>';
+}
+function pinHTML(){
+  if (!S.verPin) return '<div class="fila-btn" style="margin:16px 0 8px"><button class="btn sec chico" onclick="S.verPin=true;render()">Cambiar el PIN del club</button></div>';
+  return '<section class="panel" style="margin-top:16px"><h2>Cambiar el PIN del club</h2>' +
+    '<p class="nota" style="margin:-6px 0 12px">Lo van a necesitar todos los que carguen partidos de este club, así que avisales el nuevo.</p>' +
+    '<label>PIN actual<input id="p0" type="password" inputmode="numeric" autocomplete="off"></label>' +
+    '<label>PIN nuevo<input id="p1" type="password" inputmode="numeric" autocomplete="off"></label>' +
+    '<label>Repetir el PIN nuevo<input id="p2" type="password" inputmode="numeric" autocomplete="off" onkeydown="if(event.key===\'Enter\')cambiarPin()"></label>' +
+    '<div class="fila-btn"><button class="btn" id="bpin" onclick="cambiarPin()">Guardar el PIN</button>' +
+    '<button class="btn sec" onclick="S.verPin=false;render()">Cancelar</button></div></section>';
+}
+async function cambiarPin(){
+  var a = $('#p0').value.trim(), n = $('#p1').value.trim(), r2 = $('#p2').value.trim();
+  if (!a || !n || !r2) return toast('Completá los tres casilleros.', true);
+  if (a !== S.club.pin) return toast('El PIN actual no es correcto.', true);
+  var b = $('#bpin'); b.disabled = true; b.textContent = 'Guardando…';
+  var r = await api('cambiarPin', {club:S.club.id, pin:a, nuevo:n, confirma:r2});
+  if (!r.ok){ toast(r.error, true); b.disabled = false; b.textContent = 'Guardar el PIN'; return; }
+  S.club.pin = r.pin; S.verPin = false;
+  toast('PIN cambiado'); render();
 }
 async function entrarClub(){
   var id = $('#lc').value, pin = $('#lp').value.trim();
@@ -1022,7 +1097,8 @@ function seccion(parte, tit, campos, nota, alta){
 function vABT(){
   if (!S.abt) return loginHTML('Configuración de la ABT', 'la', 'entrarABT', 'Clubes, PIN, categorías, aranceles, árbitros, cierre de carga y claves.');
   var p = S.abt.cfg.params, set = function(k){ return ' oninput="S.abt.cfg.params.' + k + '=this.value"'; };
-  return '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
+  var h = bannerAvisos(null);
+  h += '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
     seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text']], 'Cada club entra a Mi club con su PIN.', 'Agregar club') +
     seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Cualquier categoría se puede cargar cualquier día de la semana.', 'Agregar categoría') +
     seccion('torneos', 'Torneos', [['nombre', 'Nombre del torneo', 'text']], 'Al cargar una tira, el club elige a qué torneo pertenece. Sirve para separar los gastos en las estadísticas.', 'Agregar torneo') +
@@ -1035,11 +1111,14 @@ function vABT(){
     '<label>Minutos extra si cambia de sede<input type="number" inputmode="numeric" value="' + p.extraCambioSede + '"' + set('extraCambioSede') + '></label></div>' +
     '<label>Duración estimada de cada partido, para el calendario (minutos)<input type="number" inputmode="numeric" value="' + p.duracionMin + '"' + set('duracionMin') + '></label>' +
     '<label>Horas antes del partido en que cierra la carga<input type="number" inputmode="numeric" value="' + p.anticipacionHoras + '"' + set('anticipacionHoras') + '></label>' +
+    '<label>Horas de anticipación para avisar falta de árbitro<input type="number" inputmode="numeric" value="' + (p.horasAviso || 48) + '"' + set('horasAviso') + '></label>' +
+    '<label>Email para avisos automáticos de falta de árbitro<input type="email" value="' + esc(p.emailABT || '') + '" placeholder="correo@ejemplo.com"' + set('emailABT') + '></label>' +
     '<label>Clave del Colegio<input value="' + esc(p.claveColegio) + '"' + set('claveColegio') + '></label>' +
     '<label>Clave de la ABT<input value="' + esc(p.claveABT) + '"' + set('claveABT') + '></label>' +
     '<label>Clave de estadísticas<input value="' + esc(p.claveStats) + '"' + set('claveStats') + '></label>' +
     '<button class="btn" onclick="guardarCfg(\'params\')">Guardar reglas y claves</button>' +
     '<p class="nota">Cada tira cierra en lo que pase primero: el cierre semanal (por ejemplo, jueves 20:00 de esa semana) o las horas de anticipación antes de su primer partido. Así un partido de Primera del martes cierra el lunes.</p></section>';
+  return h;
 }
 async function guardarCfg(parte){
   var r = await api('guardarConfig', {clave:S.abt.clave, parte:parte, valor:S.abt.cfg[parte]});
