@@ -743,7 +743,7 @@ function textoWA(ts){
     g[1].forEach(function(t){
       L.push('🏀 *' + titulo(t) + '* – ' + t.sede);
       partOrd(t).forEach(function(x){ L.push(x.hora + '  ' + catNom(x.cat) + ' – ' + ([x.a1, x.a2].filter(Boolean).map(arbNom).join(' y ') || 'a designar')); });
-      L.push('Total tira: ' + plata(totalTira(t, S.cfg, P())) + ' (paga ' + clubNom(t.local) + ')', '');
+      L.push('');
     });
   });
   return L.join('\n');
