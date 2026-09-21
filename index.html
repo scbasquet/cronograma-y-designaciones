@@ -156,7 +156,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v25';
+var VERSION = 'v26';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -822,7 +822,17 @@ async function cargar(silencioso){
     if (!S.cfg) $('#main').innerHTML = '<p class="vacio">No se pudo cargar la cartelera. ' + esc(r.error) + ' <button class="btn sec chico" onclick="cargar()">Reintentar</button></p>';
     return;
   }
-  S.offline = false; S.cfg = r.config; S.tiras = r.tiras; S.ahora = r.ahora; render();
+  S.offline = false;
+  /* Preservar escudos locales si el servidor los devuelve vacíos */
+  if (S.cfg && S.cfg.clubes) {
+    (r.config.clubes || []).forEach(function(c){
+      if (!c.escudo) {
+        var viejo = S.cfg.clubes.filter(function(k){ return k.id === c.id; })[0];
+        if (viejo && viejo.escudo) c.escudo = viejo.escudo;
+      }
+    });
+  }
+  S.cfg = r.config; S.tiras = r.tiras; S.ahora = r.ahora; render();
   if (S.club) cargarDisc();
   if (S.abt) cargarDiscABT();
   cargarAvisos();
@@ -1465,7 +1475,7 @@ async function subirEscudoABT(input){
     setMsg('');
     var nom=(S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre||clubId;
     S.escSubiendo = null; S.escProgreso = '';
-    toast('Escudo de '+nom+' guardado'); render(); cargar();
+    toast('Escudo de '+nom+' guardado'); render();
   });
 }
 /* Comprime imagen a JPEG base64 de máximo 45KB usando canvas, luego la manda en chunks */
