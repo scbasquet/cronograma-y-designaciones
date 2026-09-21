@@ -626,57 +626,14 @@ function toast(m, err){ var el = $('#toast'); el.textContent = m; el.className =
 /* ---------- Escudos ---------- */
 function escudoURL(clubId){
   var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
-  return c && c.escudo ? 'data:image/jpeg;base64,' + c.escudo : '';
+  return c && c.escudo ? c.escudo : '';
 }
 function escudoImg(clubId, size){
   var u = escudoURL(clubId);
   if (!u) return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:var(--linea);display:flex;align-items:center;justify-content:center;font-size:'+(size*0.4)+'px;color:var(--gris)">🏀</div>';
   return '<img src="'+u+'" alt="" style="width:'+size+'px;height:'+size+'px;border-radius:50%;object-fit:cover;flex:none">';
 }
-/* Comprime una imagen a JPEG base64 de máximo maxKB KB usando canvas */
-function comprimirImg(file, maxKB, cb){
-  var reader = new FileReader();
-  reader.onload = function(ev){
-    var img = new window.Image();
-    img.onload = function(){
-      var MAX = 256, w = img.width, h = img.height;
-      if (w > MAX || h > MAX){ var r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
-      var q = 0.82;
-      function intento(){
-        var c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        var data = c.toDataURL('image/jpeg', q).split(',')[1];
-        if (data.length > maxKB * 1024 * 1.37 && q > 0.35){ q = Math.max(0.35, q - 0.1); intento(); }
-        else cb(null, data);
-      }
-      intento();
-    };
-    img.onerror = function(){ cb('No se pudo leer la imagen.'); };
-    img.src = ev.target.result;
-  };
-  reader.onerror = function(){ cb('No se pudo leer el archivo.'); };
-  reader.readAsDataURL(file);
-}
 
-/* ---------- Compartir al calendario ---------- */
-function baseURL(){ return location.origin + location.pathname; }
-function linkTira(id){ return baseURL() + '?t=' + id; }
-function linkSemana(club, finde, cat){ return baseURL() + '?c=' + club + '&s=' + finde + (cat ? '&k=' + cat : ''); }
-function linkICS(club, cat){
-  if (!API_URL) return '';
-  return API_URL + '?action=ics&club=' + encodeURIComponent(club || '') + (cat ? '&cat=' + encodeURIComponent(cat) : '');
-}
-function bajarICS(texto, nombre){
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([texto], {type:'text/calendar;charset=utf-8'}));
-  a.download = nombre.replace(/[^\w\-]+/g, '-') + '.ics';
-  document.body.appendChild(a); a.click();
-  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-}
-async function copiar(txt){
-  try { await navigator.clipboard.writeText(txt); toast('Link copiado'); }
-  catch (e) { toast('Mantené apretado el link para copiarlo', true); }
-}
 
 /* ---------- Vista de invitado: alguien abrió un link de tira ---------- */
 async function cargarDisc(){
@@ -694,6 +651,21 @@ async function cargarAvisos(){
   var p2 = S.club ? {club:S.club.id, pin:S.club.pin} : {clave:S.colegio || (S.abt && S.abt.clave)};
   var r = await api('avisos', p2);
   if (r.ok){ S.avisos = r.sinArbitros; render(); }
+}
+/* ---------- Compartir al calendario ---------- */
+function baseURL(){ return location.origin + location.pathname; }
+function linkTira(id){ return baseURL() + '?t=' + id; }
+function linkSemana(club, finde, cat){ return baseURL() + '?c=' + club + '&s=' + finde + (cat ? '&k=' + cat : ''); }
+function bajarICS(texto, nombre){
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([texto], {type:'text/calendar;charset=utf-8'}));
+  a.download = nombre.replace(/[^\w\-]+/g, '-') + '.ics';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+async function copiar(txt){
+  try { await navigator.clipboard.writeText(txt); toast('Link copiado'); }
+  catch (e) { toast('Mantené apretado el link para copiarlo', true); }
 }
 async function cargarInvitado(){
   var q = S.invQ, r = q.t ? await api('tira', {id:q.t}) : await api('semana', {club:q.c, finde:q.s, cat:q.k || ''});
@@ -877,30 +849,12 @@ function semanalHTML(club, cat, nom){
       : '<p class="nota" style="margin:0">No hay partidos cargados para esta semana' + (cat ? ' en ' + esc(catNom(cat)) : '') + '. Cargalos primero o cambiá de semana con las flechas de arriba.</p>') + '</section>';
 }
 function escudoClubHTML(club){
-  var c = buscar(S.cfg.clubes, club), u = escudoURL(club);
-  return '<h2 class="dia">Escudo del club</h2><section class="panel">' +
-    '<p class="sub" style="margin:-4px 0 12px">El escudo aparece en la cartelera al lado del nombre del club.</p>' +
-    (u ? '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">' + escudoImg(club,64) + '<span class="sub">Escudo actual</span></div>' : '') +
-    '<label style="display:flex;align-items:center;gap:10px;background:#F6F8FA;border:1px solid var(--linea);border-radius:10px;padding:12px 14px;cursor:pointer;min-height:52px">' +
-    '<span style="font-size:22px">🖼️</span><span style="flex:1">' + (u ? 'Cambiar el escudo (JPG)' : 'Subir el escudo (JPG)') + '</span>' +
-    '<input type="file" accept="image/*" style="display:none" onchange="subirEscudo(this)"></label>' +
-    '<p id="msgEsc" class="nota" style="margin-top:6px"></p></section>';
+  var u = escudoURL(club);
+  if (!u) return '';
+  return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">' +
+    escudoImg(club, 52) + '<span class="sub">Escudo de ' + esc(clubNom(club)) + '</span></div>';
 }
-async function subirEscudo(input){
-  var f = input.files[0]; if (!f) return;
-  $('#msgEsc').textContent = 'Comprimiendo…';
-  comprimirImg(f, 280, async function(err, b64){
-    if (err){ $('#msgEsc').textContent = err; return; }
-    $('#msgEsc').textContent = 'Subiendo…';
-    var r = await api('subirEscudo', {club:S.club.id, pin:S.club.pin, img:b64});
-    if (!r.ok){ $('#msgEsc').textContent = r.error; return; }
-    // actualizar el escudo en cfg local
-    S.cfg.clubes = S.cfg.clubes.map(function(c){
-      return c.id === S.club.id ? Object.assign({}, c, {escudo:b64}) : c;
-    });
-    $('#msgEsc').textContent = ''; toast('Escudo actualizado'); render();
-  });
-}
+
 function disciplinaClubHTML(club){
   if (!S.disc) return '';
   var L = (S.disc || []).filter(function(n){ return (n.clubes || []).indexOf(club) >= 0; });
@@ -1311,7 +1265,7 @@ function vABT(){
   var p = S.abt.cfg.params, set = function(k){ return ' oninput="S.abt.cfg.params.' + k + '=this.value"'; };
   var h = bannerAvisos(null);
   h += '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
-    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text']], 'Cada club entra a Mi club con su PIN.', 'Agregar club') +
+    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text'],['linkDrive','Link de Drive del escudo (opcional)','text']], 'Cada club entra a Mi club con su PIN. Para el escudo: subí el JPG a Google Drive, compartilo como "cualquiera con el link puede verlo" y pegá el link.', 'Agregar club') +
     seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Cualquier categoría se puede cargar cualquier día de la semana.', 'Agregar categoría') +
     seccion('torneos', 'Torneos', [['nombre', 'Nombre del torneo', 'text']], 'Al cargar una tira, el club elige a qué torneo pertenece. Sirve para separar los gastos en las estadísticas.', 'Agregar torneo') +
     seccion('arbitros', 'Árbitros', [['nombre','Nombre','text'],['tel','WhatsApp','tel','2494123456']], 'Teléfono con código de área, sin 0 ni 15, para mandarle sus designaciones.', 'Agregar árbitro') +
