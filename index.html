@@ -85,7 +85,7 @@ label.chk input{width:22px;height:22px;min-height:0;margin:0;flex:none;accent-co
 .vacio{background:#fff;border:1px dashed #B9C3CF;border-radius:12px;padding:18px;color:var(--gris);margin:14px 0}
 .lista .item{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid var(--linea);border-radius:10px;padding:10px 14px;margin-bottom:8px}
 h3.mini{font:700 19px var(--cond);margin:16px 0 8px;color:var(--tabla)}
-nav.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--linea);display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom);z-index:5}
+nav.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--linea);display:grid;grid-template-columns:repeat(5,1fr);padding-bottom:env(safe-area-inset-bottom);z-index:5}
 nav.tabs button{background:none;border:0;padding:12px 0 14px;font:600 15px Barlow,system-ui,sans-serif;color:var(--gris);cursor:pointer}
 nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 #toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:var(--tabla2);color:#fff;padding:11px 18px;border-radius:10px;font-weight:600;opacity:0;transition:.2s;pointer-events:none;max-width:92vw;z-index:9}
@@ -117,6 +117,8 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 .badge{display:inline-block;font:700 12px Barlow,system-ui,sans-serif;padding:3px 9px;border-radius:20px;margin-left:6px}
 .badge.pend{background:#FFF3CD;color:#856404}
 .badge.res{background:#D4EDDA;color:#155724}
+.badge.ap{background:#CCE5FF;color:#004085}
+.badge.ep{background:#E2E3E5;color:#383D41}
 .btn.cal1{background:#1B6E7D;border-color:#1B6E7D}
 .btn.cal2{background:#fff;color:#1B6E7D;border-color:#1B6E7D}
 .evento .cat .vs{font-weight:400;color:var(--gris);font-size:14px}
@@ -148,12 +150,13 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
   <button data-tab="club" onclick="irTab('club')">Mi club</button>
   <button data-tab="colegio" onclick="irTab('colegio')">Colegio</button>
   <button data-tab="abt" onclick="irTab('abt')">ABT</button>
+  <button data-tab="htd" onclick="irTab('htd')">HTD</button>
 </nav>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v16';
+var VERSION = 'v17';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
@@ -535,7 +538,7 @@ function guardarConfig_(p, S, cfg, esABT){
 var DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 function ahoraLocal(){ var d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
-var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null};
+var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null, htd:null, htdClave:null, htdEd:null};
 
 /* ---------- Modo demo: mismo núcleo que el servidor, datos en memoria ---------- */
 var MOCK = (function(){
@@ -709,6 +712,7 @@ function irTab(t){ S.tab = t; S.edit = null; S.borrar = null; render(); window.s
 function moverFinde(n){ S.finde = addDias(S.finde, 7*n); S.edit = null; S.borrar = null; $('#tfinde').textContent = tituloFinde(S.finde); cargar(); }
 function salir(k){ S[k] = null; S.verPin = false; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); 
   if (k === 'abt' || k === 'colegio'){ S.discABT = null; S.discEd = null; }
+  if (k === 'htd'){ S.htd = null; S.htdClave = null; S.htdEd = null; }
   S.disc = null;
 }
 function render(){
@@ -719,7 +723,7 @@ function render(){
   if (S.tab === 'stats') document.querySelectorAll('nav.tabs button').forEach(function(b){ b.classList.remove('on'); });
   if (S.invId){ document.querySelector('nav.tabs').style.display = 'none'; $('#main').innerHTML = vInvitado(); return; }
   if (!S.cfg){ $('#main').innerHTML = '<p class="vacio">Cargando la cartelera…</p>'; return; }
-  $('#main').innerHTML = ({cartelera:vCartelera, club:vClub, colegio:vColegio, abt:vABT, stats:vStats})[S.tab]();
+  $('#main').innerHTML = ({cartelera:vCartelera, club:vClub, colegio:vColegio, abt:vABT, stats:vStats, htd:vHTD})[S.tab]()||'';
 }
 
 /* ---------- Tarjeta de tira ---------- */
@@ -847,6 +851,12 @@ function disciplinaClubHTML(club){
       '<div class="disc-cuerpo"><div class="disc-meta">Infracción: ' + fechaLarga(n.fecha) + ' · Notificado: ' + fechaLarga(n.act.slice(0,10)) +
       ' · Enviado por: ' + (n.emisor === 'colegio' ? 'Colegio de Árbitros' : 'ABT') + '</div>' +
       '<p>' + esc(n.texto) + '</p>';
+    if (n.resolucion && n.resolucion.texto){
+      var colRc = n.resolucion.estado==='resuelto'?'res':n.resolucion.estado==='apelado'?'ap':'ep';
+      cab += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">⚖️ Resolución del HTD <span class="badge '+colRc+'">' + esc(n.resolucion.estado.charAt(0).toUpperCase()+n.resolucion.estado.slice(1)) + '</span></h4>' +
+        '<p class="disc-meta">' + fechaLarga(n.resolucion.act.slice(0,10)) + '</p>' +
+        '<p style="font-size:14px;color:var(--tinta)">' + esc(n.resolucion.texto) + '</p></div>';
+    }
     if (tieneDesc && !editDesc){
       cab += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">✅ Descargo enviado</h4><p style="margin:4px 0 0;font-size:14px;color:var(--tinta)">' + esc(n.descargo.texto) + '</p></div>';
     }
@@ -1075,6 +1085,12 @@ function discCardLeer(n, perfil){
     '<button class="btn chico peligro" onclick="borrarNotifPanel(\''+n.id+'\')">Borrar</button></span>' : '') + '</div>' +
     '<div class="disc-cuerpo"><div class="disc-meta">Clubes: ' + esc(noms) + ' · Infracción: ' + fechaLarga(n.fecha) +
     ' · Enviado por: ' + (n.emisor==='colegio'?'Colegio de Árbitros':'ABT') + '</div><p>' + esc(n.texto) + '</p>';
+  if (n.resolucion && n.resolucion.texto){
+    var colR = n.resolucion.estado==='resuelto'?'res':n.resolucion.estado==='apelado'?'ap':'ep';
+    h += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">⚖️ Resolución del HTD <span class="badge '+colR+'">' + esc(n.resolucion.estado.charAt(0).toUpperCase()+n.resolucion.estado.slice(1)) + '</span></h4>' +
+      '<p class="disc-meta">' + fechaLarga(n.resolucion.act.slice(0,10)) + '</p>' +
+      '<p style="font-size:14px;color:var(--tinta)">' + esc(n.resolucion.texto) + '</p></div>';
+  }
   if (n.descargo && n.descargo.texto){
     var dc = n.descargo, dcClub = (S.cfg.clubes||[]).filter(function(k){return k.id===dc.club;})[0];
     h += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">📩 Descargo recibido' + (dcClub?' de '+esc(dcClub.nombre):'') + '</h4>' +
@@ -1247,6 +1263,7 @@ function vABT(){
     '<label>Horas antes del partido en que cierra la carga<input type="number" inputmode="numeric" value="' + p.anticipacionHoras + '"' + set('anticipacionHoras') + '></label>' +
     '<label>Horas de anticipación para avisar falta de árbitro<input type="number" inputmode="numeric" value="' + (p.horasAviso || 48) + '"' + set('horasAviso') + '></label>' +
     '<label>Email para avisos automáticos de falta de árbitro<input type="email" value="' + esc(p.emailABT || '') + '" placeholder="correo@ejemplo.com"' + set('emailABT') + '></label>' +
+    '<label>Clave del HTD<input value="' + esc(p.claveHTD || 'htd2026') + '" ' + set('claveHTD') + '></label>' +
     '<label>Clave del Colegio<input value="' + esc(p.claveColegio) + '"' + set('claveColegio') + '></label>' +
     '<label>Clave de la ABT<input value="' + esc(p.claveABT) + '"' + set('claveABT') + '></label>' +
     '<label>Clave de estadísticas<input value="' + esc(p.claveStats) + '"' + set('claveStats') + '></label>' +
@@ -1281,6 +1298,86 @@ function discToggleClub(id){
 }
 
 
+
+/* ---------- HTD (Honorable Tribunal de Disciplina) ---------- */
+async function entrarHTD(){
+  var k = $('#lh').value.trim(); if (!k) return toast('Escribí la clave.', true);
+  var r = await api('loginHTD', {clave:k});
+  if (!r.ok) return toast(r.error, true);
+  S.htdClave = k; S.htd = r.notifs; render();
+}
+async function recargarHTD(){
+  if (!S.htdClave) return;
+  var r = await api('loginHTD', {clave:S.htdClave});
+  if (r.ok){ S.htd = r.notifs; render(); }
+}
+async function guardarResolucion(notifId){
+  var ed = S.htdEd; if (!ed) return;
+  var txt = (ed.texto||'').trim(); if (!txt) return toast('Escribí el texto de la resolución.',true);
+  var r = await api('resolucion', {clave:S.htdClave, notifId:notifId, texto:txt, estado:ed.estado||'en proceso'});
+  if (!r.ok) return toast(r.error, true);
+  S.htdEd = null; toast('Resolución guardada'); await recargarHTD(); render();
+}
+function vHTD(){
+  if (!S.htd) return loginHTML('Honorable Tribunal de Disciplina', 'lh', 'entrarHTD', 'Acceso exclusivo para integrantes del HTD.');
+  var disc = S.htd, ed = S.htdEd;
+  var pend = disc.filter(function(n){ return !n.resolucion; }).length;
+  var h = '<div class="cabclub"><div><h2>HTD</h2><p class="sub">Honorable Tribunal de Disciplina · ' +
+    disc.length + ' caso' + (disc.length!==1?'s':'') + ', ' + pend + ' sin resolver</p></div>' +
+    '<button class="btn sec chico" onclick="salir(\'htd\')">Salir</button></div>';
+  if (!disc.length) return h + '<p class="vacio">No hay notificaciones cargadas por el Colegio ni por la ABT.</p>';
+  h += disc.map(function(n){
+    var clubes = S.cfg ? (n.clubes||[]).map(function(id){ var cc=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0]; return cc?cc.nombre:id; }).join(', ') : (n.clubes||[]).join(', ');
+    var catNoms = S.cfg ? (n.clubes||[]).map(function(id){ var cc=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0]; return cc?cc.nombre:id; }).join(', ') : '';
+    var colE = n.estado==='resuelto'?'res':n.estado==='pendiente'?'pend':'ep';
+    var card = '<article class="tira" style="margin-bottom:14px"><div class="tira-cab">' +
+      '<h3 style="font-size:20px">' + esc(n.texto.slice(0,70)) + (n.texto.length>70?'…':'') +
+      ' <span class="badge ' + colE + '">' + esc(n.estado.charAt(0).toUpperCase()+n.estado.slice(1)) + '</span></h3>' +
+      '<div class="sub">Clubes: ' + esc(clubes) + ' · Infracción: ' + fechaLarga(n.fecha) +
+      ' · Enviado por: ' + (n.emisor==='colegio'?'Colegio de Árbitros':'ABT') + '</div></div>';
+    // informe
+    card += '<div style="padding:10px 14px;border-top:1px solid var(--linea)">' +
+      '<div class="disc-meta">📋 Informe</div><p style="margin:4px 0 0;font-size:14px">' + esc(n.texto) + '</p></div>';
+    // descargo
+    if (n.descargo && n.descargo.texto){
+      var dcClub = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===n.descargo.club;})[0] : null;
+      card += '<div style="padding:10px 14px;border-top:1px solid var(--linea);background:#F6F8FA">' +
+        '<div class="disc-meta">📩 Descargo' + (dcClub?' de '+esc(dcClub.nombre):'') + ' — ' + fechaLarga(n.descargo.act.slice(0,10)) + '</div>' +
+        '<p style="margin:4px 0 0;font-size:14px">' + esc(n.descargo.texto) + '</p></div>';
+    } else {
+      card += '<div style="padding:8px 14px;border-top:1px solid var(--linea)"><span class="disc-meta">📩 Sin descargo del club aún</span></div>';
+    }
+    // resolución
+    if (n.resolucion && n.resolucion.texto){
+      var colR = n.resolucion.estado==='resuelto'?'res':n.resolucion.estado==='apelado'?'ap':'ep';
+      card += '<div style="padding:10px 14px;border-top:2px solid var(--tabla);background:#EDF6F8">' +
+        '<div class="disc-meta">⚖️ Resolución — ' + fechaLarga(n.resolucion.act.slice(0,10)) + ' <span class="badge '+colR+'">' + esc(n.resolucion.estado.charAt(0).toUpperCase()+n.resolucion.estado.slice(1)) + '</span></div>' +
+        '<p style="margin:4px 0 8px;font-size:14px">' + esc(n.resolucion.texto) + '</p>' +
+        '<button class="btn sec chico" onclick="S.htdEd={notifId:\'' + n.id + '\',texto:' + JSON.stringify(n.resolucion.texto) + ',estado:\'' + n.resolucion.estado + '\'};render()">Editar resolución</button></div>';
+    } else {
+      card += '<div style="padding:10px 14px;border-top:2px solid var(--tabla)">' +
+        '<button class="btn chico" onclick="S.htdEd={notifId:\'' + n.id + '\',texto:\'\',estado:\'en proceso\'};render()">Cargar resolución</button></div>';
+    }
+    // editor de resolución
+    if (ed && ed.notifId === n.id){
+      card += '<div style="padding:12px 14px;border-top:1px solid var(--linea);background:#FAFBFC">' +
+        '<label style="font-size:14px;color:var(--gris);display:block;margin-bottom:4px">Texto de la resolución</label>' +
+        '<textarea rows="5" style="display:block;width:100%;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:8px;padding:10px;resize:vertical" oninput="S.htdEd.texto=this.value">' + esc(ed.texto) + '</textarea>' +
+        '<label style="display:block;margin-top:8px;font-size:14px;color:var(--gris)">Estado del caso</label>' +
+        '<select style="display:block;width:100%;margin-top:4px;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:8px;padding:10px;min-height:44px" onchange="S.htdEd.estado=this.value">' +
+          '<option value="en proceso"' + (ed.estado==='en proceso'?' selected':'') + '>En proceso</option>' +
+          '<option value="resuelto"' + (ed.estado==='resuelto'?' selected':'') + '>Resuelto</option>' +
+          '<option value="apelado"' + (ed.estado==='apelado'?' selected':'') + '>Apelado</option>' +
+        '</select>' +
+        '<div class="fila-btn" style="margin-top:10px">' +
+          '<button class="btn" onclick="guardarResolucion(\'' + n.id + '\')">Guardar resolución</button>' +
+          '<button class="btn sec" onclick="S.htdEd=null;render()">Cancelar</button>' +
+        '</div></div>';
+    }
+    return card + '</article>';
+  }).join('');
+  return h;
+}
 /* ---------- Arranque y actualización en vivo ---------- */
 (function(){
   var q = {}, re = /[?&](t|c|s|k)=([\w-]+)/g, m;
