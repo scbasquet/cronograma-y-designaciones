@@ -640,6 +640,10 @@ function guardarConfig_(p, S, cfg, esABT){
   return {ok:true, config:cfgABT_(cfg, paramsDe(cfg))};
 }
 /* ===== FIN NÚCLEO ===== */
+
+var DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function ahoraLocal(){ var d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
 var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null, htd:null, htdClave:null, htdEd:null};
 
 /* ---------- Modo demo: mismo núcleo que el servidor, datos en memoria ---------- */
