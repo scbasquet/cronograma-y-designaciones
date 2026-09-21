@@ -156,10 +156,11 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v21';
+var VERSION = 'v22';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
-var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
+/* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
+var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026', claveHTD:'htd2026'};
 var CFG_EJEMPLO = {
   clubes:[
     {id:'ind', nombre:'Independiente', pin:'1111', sede:'Gimnasio Independiente'},
@@ -255,6 +256,12 @@ function statsDe(tiras, cfg, P, anio, sem){
     clubes:orden(CL), arbitros:orden(AR),
     total:tot, pendiente:pend, partidos:np
   };
+}
+function driveImgURL_(raw){
+  var m=raw.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  if(m) return 'https://drive.google.com/thumbnail?id='+m[1]+'&sz=w256';
+  if(/^[a-zA-Z0-9_-]{25,}$/.test(raw)) return 'https://drive.google.com/thumbnail?id='+raw+'&sz=w256';
+  return raw;
 }
 function cfgABT_(cfg, P){
   return {clubes:cfg.clubes || [], categorias:cfg.categorias || [], torneos:cfg.torneos || [], arbitros:cfg.arbitros || [], params:P};
@@ -374,6 +381,7 @@ function core_handle(action, p, S, ahora){
   function err(m){ throw new Error(m); }
   function club(id){ return (cfg.clubes || []).filter(function(c){ return c.id === id; })[0]; }
   function esColegio(k){ return !!k && (String(k) === String(P.claveColegio) || String(k) === String(P.claveABT)); }
+  function esHTD(k){ return !!k && (String(k) === String(P.claveHTD) || String(k) === String(P.claveABT)); }
   function esABT(k){ return !!k && String(k) === String(P.claveABT); }
   function clubOk(){ var c = club(p.club); if (!c || String(c.pin) !== String(p.pin)) err('El PIN no coincide con ese club.'); return c; }
   switch (action){
@@ -399,6 +407,44 @@ function core_handle(action, p, S, ahora){
       var nom = (cb ? cb.nombre : 'ABT Tandil') + (kb ? ' · ' + kb.nombre : '') + ' · Básquet';
       return {ok:true, ics:icsDe(nom, eventosDe(S.getTiras(''), cfg, P, p.club || '', p.cat || ''), ahora)};
     }
+    case 'guardarEscudo': {
+      if (!esABT(p.clave)) err('Clave incorrecta.');
+      var clubId = String(p.club || '').trim();
+      var chunk = String(p.chunk || '').trim();
+      var idx = Number(p.idx) || 0;
+      var total = Number(p.total) || 1;
+      var uid_ = String(p.uid || 'esc').replace(/[^a-z0-9]/gi,'');
+      if (!chunk) err('No llegó el chunk de imagen.');
+      var key = 'esc_' + clubId + '_' + uid_;
+      S.putChunk(key, idx, total, chunk);
+      if (idx < total - 1) return {ok:true, done:false};
+      var b64 = S.getChunks(key, total);
+      S.delChunks(key, total);
+      if (!b64) err('Error al ensamblar la imagen. Intentá de nuevo.');
+      if (b64.length > 150000) err('La imagen quedó demasiado grande incluso comprimida.');
+      var lista = (cfg.clubes || []).map(function(k){
+        if (k.id !== clubId) return k;
+        return Object.assign({}, k, {escudo:b64});
+      });
+      if (!lista.some(function(k){ return k.id === clubId; })) err('Ese club no existe.');
+      S.setConfig('clubes', lista);
+      return {ok:true, done:true};
+    }
+    case 'loginHTD': {
+      if (!esHTD(p.clave)) err('Clave incorrecta.');
+      return {ok:true, notifs:S.getDisciplina()};
+    }
+    case 'resolucion': {
+      if (!esHTD(p.clave)) err('Clave incorrecta.');
+      var notifR = S.getDisciplina().filter(function(x){ return x.id === p.notifId; })[0];
+      if (!notifR) err('La notificación no existe.');
+      var txtR = String(p.texto || '').trim(); if (!txtR) err('Escribí el texto de la resolución.');
+      var estadosR = ['en proceso','resuelto','apelado'];
+      var estR = estadosR.indexOf(p.estado) >= 0 ? p.estado : 'en proceso';
+      notifR.resolucion = {texto:txtR, estado:estR, act:ahora};
+      notifR.estado = estR === 'resuelto' ? 'resuelto' : 'pendiente';
+      S.putDisciplina(notifR); return {ok:true, notif:notifR};
+    }
     case 'avisos': {
       var P2 = paramsDe(cfg), ts = S.getTiras('');
       if (p.clave){
@@ -420,13 +466,74 @@ function core_handle(action, p, S, ahora){
     case 'loginABT':
       if (!esABT(p.clave)) err('Clave incorrecta.');
       return {ok:true, config:cfgABT_(cfg, P)};
+    case 'disciplina': {
+  /* lectura: club ve sus notificaciones */
+  if (p.club && p.pin) {
+    var cd = (cfg.clubes || []).filter(function(k){ return k.id === p.club; })[0];
+    if (!cd || String(cd.pin) !== String(p.pin)) err('PIN incorrecto.');
+    var todas = S.getDisciplina();
+    var mias = todas.filter(function(n){ return (n.clubes || []).indexOf(p.club) >= 0; });
+    return {ok:true, notifs:mias};
+  }
+  /* lectura: Colegio o ABT ve todas */
+  if (p.clave && p.solo === 'leer') {
+    if (!esColegio(p.clave)) err('Clave incorrecta.');
+    return {ok:true, notifs:S.getDisciplina()};
+  }
+  /* escritura: ABT o Colegio crean o editan */
+  var emisor = esABT(p.clave) ? 'abt' : esColegio(p.clave) ? 'colegio' : null;
+  if (!emisor) err('Clave incorrecta.');
+  var nd = p.notif || {};
+  var clubsD = Array.isArray(nd.clubes) ? nd.clubes.filter(function(id){ return (cfg.clubes || []).some(function(k){ return k.id === id; }); }) : [];
+  if (emisor === 'abt' && clubsD.length === 0) err('Elegí al menos un club.');
+  if (emisor === 'colegio'){
+    if (clubsD.length === 0) err('Elegí al menos un club.');
+    clubsD = clubsD.filter(function(id){ return id !== '__abt'; });
+  }
+  /* El Colegio incluye siempre a la ABT como destinataria interna */
+  var notifABT = emisor === 'colegio' ? true : !!nd.notifABT;
+  var txt = String(nd.texto || '').trim(); if (!txt) err('Escribí el texto de la notificación.');
+  var fechaD = String(nd.fecha || '').trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaD)) err('La fecha de la infracción es obligatoria.');
+  var estado = ['pendiente','resuelto'].indexOf(nd.estado) >= 0 ? nd.estado : 'pendiente';
+  var vieja = nd.id ? S.getDisciplina().filter(function(x){ return x.id === nd.id; })[0] : null;
+  var nv = {id: nd.id || uid(), emisor:emisor, clubes:clubsD, notifABT:notifABT,
+    texto:txt, fecha:fechaD, estado:estado, act:ahora,
+    descargo: vieja ? (vieja.descargo || null) : null};
+  S.putDisciplina(nv); return {ok:true, notif:nv};
+}
+case 'borrarNotif': {
+  if (!esColegio(p.clave)) err('Clave incorrecta.');
+  S.delDisciplina(p.id); return {ok:true};
+}
+case 'descargo': {
+  var dc = (cfg.clubes || []).filter(function(k){ return k.id === p.club; })[0];
+  if (!dc || String(dc.pin) !== String(p.pin)) err('PIN incorrecto.');
+  var notifD = S.getDisciplina().filter(function(x){ return x.id === p.notifId; })[0];
+  if (!notifD) err('La notificación no existe.');
+  if ((notifD.clubes || []).indexOf(p.club) < 0) err('Esa notificación no te corresponde.');
+  var txtD = String(p.texto || '').trim(); if (!txtD) err('Escribí el texto del descargo.');
+  notifD.descargo = {texto:txtD, club:p.club, act:ahora};
+  S.putDisciplina(notifD); return {ok:true, notif:notifD};
+}
+case 'subirEscudo': {
+      var se = (cfg.clubes || []).filter(function(k){ return k.id === p.club; })[0];
+      if (!se || String(se.pin) !== String(p.pin)) err('PIN incorrecto.');
+      var b64 = String(p.img || '').trim();
+      if (!b64) err('No llegó la imagen.');
+      if (b64.length > 400000) err('La imagen es demasiado grande incluso comprimida. Probá con una foto más chica.');
+      var lista = (cfg.clubes || []).map(function(k){
+        return k.id === p.club ? {id:k.id, nombre:k.nombre, pin:k.pin, sede:k.sede, escudo:b64} : k;
+      });
+      S.setConfig('clubes', lista);
+      return {ok:true, escudo:b64};
+    }
     case 'cambiarPin': {
       var cp = clubOk(), nv = String(p.nuevo || '').trim(), cf = String(p.confirma || '').trim();
       if (nv.length < 4) err('El PIN nuevo tiene que tener al menos 4 caracteres.');
       if (/\s/.test(nv)) err('El PIN no puede tener espacios.');
       if (nv !== cf) err('Los dos PIN nuevos no coinciden. Escribilos de nuevo.');
       if (nv === String(p.pin)) err('Ese ya es el PIN actual del club.');
-      if (nv === String(P.claveABT) || nv === String(P.claveColegio) || nv === String(P.claveStats))
+      if (nv === String(P.claveABT) || nv === String(P.claveColegio) || nv === String(P.claveStats) || nv === String(P.claveHTD))
         err('Ese PIN está reservado. Elegí otro.');
       var lista = (cfg.clubes || []).map(function(k){
         return k.id === cp.id ? {id:k.id, nombre:k.nombre, pin:nv, sede:k.sede} : k;
@@ -509,11 +616,11 @@ function guardarConfig_(p, S, cfg, esABT){
   if (parte === 'params'){
     var np = {};
     for (var k in DEF_PARAMS) np[k] = (v && v[k] !== undefined && v[k] !== '') ? v[k] : P[k];
-    ['arbitrosPorPartido','cierreDia','minEntrePartidos','extraCambioSede','anticipacionHoras','duracionMin','horasAviso'].forEach(function(k){
+    ['arbitrosPorPartido','cierreDia','minEntrePartidos','extraCambioSede','anticipacionHoras','duracionMin','horasAviso','claveHTD'].forEach(function(k){
       np[k] = Number(np[k]); if (isNaN(np[k]) || np[k] < 0) err('Revisá los números de las reglas.');
     });
     if (!/^\d{2}:\d{2}$/.test(np.cierreHora)) err('La hora de cierre tiene que ser HH:MM.');
-    ['claveColegio','claveABT','claveStats'].forEach(function(k){ np[k] = String(np[k]).trim(); if (!np[k]) err('Las claves no pueden quedar vacías.'); });
+    ['claveColegio','claveABT','claveStats','claveHTD'].forEach(function(k){ np[k] = String(np[k]).trim(); if (!np[k]) err('Las claves no pueden quedar vacías.'); });
     if (np.claveStats === np.claveColegio) err('La clave de estadísticas tiene que ser distinta a la del Colegio.');
     v = np;
   } else if (parte === 'clubes' || parte === 'categorias' || parte === 'arbitros' || parte === 'torneos'){
@@ -523,7 +630,7 @@ function guardarConfig_(p, S, cfg, esABT){
       var o = {id: (r.id && !vistos[r.id]) ? String(r.id) : uid(), nombre: String(r.nombre || '').trim()};
       vistos[o.id] = 1;
       if (!o.nombre) err('Hay una fila sin nombre.');
-      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); }
+      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); var viejo_=(cfg.clubes||[]).filter(function(k){return k.id===o.id;})[0]; var rawNew_=String(r.linkDrive||'').trim(); o.escudo=rawNew_?driveImgURL_(rawNew_):(viejo_?viejo_.escudo||'':''); }
       if (parte === 'categorias'){ o.arancel = Number(r.arancel); if (r.arancel === '' || isNaN(o.arancel) || o.arancel < 0) err('Revisá el arancel de ' + o.nombre + '.'); o.libre = r.libre === true || r.libre === 'true'; }
       if (parte === 'arbitros'){ o.tel = String(r.tel || '').trim(); }
       return o;
@@ -533,11 +640,6 @@ function guardarConfig_(p, S, cfg, esABT){
   return {ok:true, config:cfgABT_(cfg, paramsDe(cfg))};
 }
 /* ===== FIN NÚCLEO ===== */
-
-
-var DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-function ahoraLocal(){ var d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
 var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null, htd:null, htdClave:null, htdEd:null};
 
 /* ---------- Modo demo: mismo núcleo que el servidor, datos en memoria ---------- */
