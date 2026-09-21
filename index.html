@@ -156,7 +156,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v20';
+var VERSION = 'v21';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
@@ -559,6 +559,10 @@ var MOCK = (function(){
     setConfig:function(k, v){ cfg[k] = clone(v); },
     getTiras:function(f){ return tiras.filter(function(x){ return !f || x.finde === f; }).map(clone); },
     getTira:function(id){ return clone(tiras.filter(function(x){ return x.id === id; })[0]); },
+    _chunks:{},
+    putChunk:function(key,idx,total,data){ this._chunks[key+'_'+idx]=data; },
+    getChunks:function(key,total){ var o=''; for(var i=0;i<total;i++){var v=this._chunks[key+'_'+i]; if(!v)return null; o+=v;} return o; },
+    delChunks:function(key,total){ for(var i=0;i<total;i++) delete this._chunks[key+'_'+i]; },
     _disc:[],
     getDisciplina:function(){ return this._disc.slice().sort(function(a,b){ return String(b.act||b.fecha).localeCompare(String(a.act||a.fecha)); }); },
     putDisciplina:function(n){ var i=this._disc.findIndex(function(d){ return d.id===n.id; }); if(i>=0)this._disc[i]=JSON.parse(JSON.stringify(n)); else this._disc.push(JSON.parse(JSON.stringify(n))); },
@@ -1329,15 +1333,22 @@ function escudosPanelABT(){
 async function subirEscudoABT(input){
   var clubId = input.dataset.club, f = input.files[0]; if (!f) return;
   var msg = document.getElementById('msg_esc_'+clubId);
-  if (msg){ msg.style.display='inline'; msg.textContent='Comprimiendo…'; }
-  comprimirImg(f, 45, async function(err, b64){
-    if (err){ if(msg){msg.textContent=err;} return toast(err,true); }
-    if (msg) msg.textContent='Subiendo…';
-    var r = await api('guardarEscudo', {clave:S.abt.clave, club:clubId, img:b64});
-    if (!r.ok){ if(msg){msg.textContent=r.error;} return toast(r.error,true); }
+  function setMsg(t){ if(msg){ msg.style.display = t ? 'inline' : 'none'; msg.textContent = t||''; } }
+  setMsg('Comprimiendo…');
+  comprimirImg(f, 40, async function(err, b64){
+    if (err){ setMsg(''); return toast(err,true); }
+    /* mandar en chunks de 3KB para no superar el límite de GET */
+    var CHUNK = 3000, total = Math.ceil(b64.length / CHUNK);
+    var uid_ = Date.now().toString(36);
+    for (var i = 0; i < total; i++){
+      setMsg('Subiendo… '+(i+1)+'/'+total);
+      var r = await api('guardarEscudo', {clave:S.abt.clave, club:clubId,
+        chunk: b64.slice(i*CHUNK,(i+1)*CHUNK), idx:i, total:total, uid:uid_});
+      if (!r.ok){ setMsg(''); return toast(r.error,true); }
+    }
     S.cfg.clubes = S.cfg.clubes.map(function(c){ return c.id===clubId ? Object.assign({},c,{escudo:b64}) : c; });
     S.abt.cfg.clubes = S.cfg.clubes;
-    if (msg){ msg.style.display='none'; }
+    setMsg('');
     var nom=(S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre||clubId;
     toast('Escudo de '+nom+' guardado'); render();
   });
