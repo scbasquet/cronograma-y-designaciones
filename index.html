@@ -156,7 +156,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v19';
+var VERSION = 'v20';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 var DEF_PARAMS = {arbitrosPorPartido:2, cierreDia:4, cierreHora:'20:00', minEntrePartidos:75, extraCambioSede:30, anticipacionHoras:24, duracionMin:90, horasAviso:48, emailABT:'', claveColegio:'colegio2026', claveABT:'abt2026', claveStats:'stats2026'};
@@ -626,7 +626,7 @@ function toast(m, err){ var el = $('#toast'); el.textContent = m; el.className =
 /* ---------- Escudos ---------- */
 function escudoURL(clubId){
   var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
-  return c && c.escudo ? c.escudo : '';
+  return c && c.escudo ? 'data:image/jpeg;base64,' + c.escudo : '';
 }
 function escudoImg(clubId, size){
   var u = escudoURL(clubId);
@@ -1312,32 +1312,58 @@ function vDiscABT(){
 function escudosPanelABT(){
   if (!S.abt) return '';
   var h = '<section class="panel"><h2>Escudos de los clubes</h2>' +
-    '<p class="nota" style="margin:-4px 0 12px">Subí el JPG de cada club a Google Drive, compartilo como "cualquiera con el link puede verlo" y pegá el link acá. Se actualiza de a un club por vez.</p>';
+    '<p class="nota" style="margin:-4px 0 12px">Tocá el botón de cada club y elegí el JPG. La app lo comprime sola (queda en menos de 45KB) y lo sube.</p>';
   (S.cfg.clubes || []).forEach(function(c){
-    h += '<div class="cfila" style="align-items:flex-end">' +
-      (c.escudo ? '<img src="'+esc(c.escudo)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;margin-bottom:10px">' : '<div style="width:40px;height:40px;border-radius:50%;background:var(--linea);display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;margin-bottom:10px">🏀</div>') +
-      '<label style="flex:1 1 180px">' + esc(c.nombre) + '<input id="esc_'+c.id+'" type="url" placeholder="https://drive.google.com/..." value="' + esc(c.escudo||'') + '"></label>' +
-      '<button class="btn sec chico" style="margin-bottom:10px;cursor:pointer" id="btn_esc_'+c.id+'" onclick="guardarEscudo(this.id.replace(\'btn_esc_\',\'\'))">Guardar</button></div>';  
+    h += '<div class="cfila" style="align-items:center;gap:10px">' +
+      (c.escudo ? '<img src="data:image/jpeg;base64,'+c.escudo+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none">' :
+        '<div style="width:44px;height:44px;border-radius:50%;background:var(--linea);display:flex;align-items:center;justify-content:center;font-size:20px;flex:none">🏀</div>') +
+      '<span style="flex:1;font-weight:600">'+esc(c.nombre)+'</span>' +
+      '<label class="btn sec chico" style="cursor:pointer;margin-bottom:0">'+
+        (c.escudo?'Cambiar':'Subir')+
+        '<input type="file" accept="image/*" style="display:none" data-club="'+c.id+'" onchange="subirEscudoABT(this)"></label>' +
+      '<span id="msg_esc_'+c.id+'" class="nota" style="margin:0;display:none"></span>' +
+      '</div>';
   });
   return h + '</section>';
 }
-async function guardarEscudo(clubId){
-  clubId = String(clubId).replace('btn_esc_','');
-  var input = document.getElementById('esc_'+clubId);
-  if (!input) return;
-  var r = await api('guardarEscudo', {clave:S.abt.clave, club:clubId, link:input.value.trim()});
-  if (!r.ok) return toast(r.error, true);
-  // actualizar el escudo en el cfg local (driveImgURL en cliente)
-  var raw = input.value.trim();
-  var url = '';
-  if (raw){
-    var m = raw.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
-    url = m ? 'https://drive.google.com/thumbnail?id='+m[1]+'&sz=w256' : raw;
-  }
-  S.cfg.clubes = S.cfg.clubes.map(function(c){ return c.id===clubId ? Object.assign({},c,{escudo:url}) : c; });
-  S.abt.cfg.clubes = S.cfg.clubes;
-  toast('Escudo de ' + (S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre + ' guardado');
-  render();
+async function subirEscudoABT(input){
+  var clubId = input.dataset.club, f = input.files[0]; if (!f) return;
+  var msg = document.getElementById('msg_esc_'+clubId);
+  if (msg){ msg.style.display='inline'; msg.textContent='Comprimiendo…'; }
+  comprimirImg(f, 45, async function(err, b64){
+    if (err){ if(msg){msg.textContent=err;} return toast(err,true); }
+    if (msg) msg.textContent='Subiendo…';
+    var r = await api('guardarEscudo', {clave:S.abt.clave, club:clubId, img:b64});
+    if (!r.ok){ if(msg){msg.textContent=r.error;} return toast(r.error,true); }
+    S.cfg.clubes = S.cfg.clubes.map(function(c){ return c.id===clubId ? Object.assign({},c,{escudo:b64}) : c; });
+    S.abt.cfg.clubes = S.cfg.clubes;
+    if (msg){ msg.style.display='none'; }
+    var nom=(S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre||clubId;
+    toast('Escudo de '+nom+' guardado'); render();
+  });
+}
+/* Comprime imagen a JPEG base64 de máximo 45KB usando canvas, luego la manda en chunks */
+function comprimirImg(file, maxKB, cb){
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    var img = new window.Image();
+    img.onload = function(){
+      var MAX = 200, w = img.width, h = img.height;
+      if (w > MAX || h > MAX){ var r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+      var q = 0.80;
+      (function intento(){
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        var data = cv.toDataURL('image/jpeg', q).split(',')[1];
+        if (data.length > maxKB * 1400 && q > 0.30){ q = Math.max(0.30, q - 0.12); intento(); }
+        else cb(null, data);
+      })();
+    };
+    img.onerror = function(){ cb('No se pudo leer la imagen.'); };
+    img.src = ev.target.result;
+  };
+  reader.onerror = function(){ cb('Error al leer el archivo.'); };
+  reader.readAsDataURL(file);
 }
 function discToggleClub(id){
   var arr = S.discEd.clubes = S.discEd.clubes || [];
