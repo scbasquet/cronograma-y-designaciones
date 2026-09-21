@@ -156,7 +156,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v22';
+var VERSION = 'v23';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -669,8 +669,10 @@ var MOCK = (function(){
     putChunk:function(key,idx,total,data){ this._chunks[key+'_'+idx]=data; },
     getChunks:function(key,total){ var o=''; for(var i=0;i<total;i++){var v=this._chunks[key+'_'+i]; if(!v)return null; o+=v;} return o; },
     delChunks:function(key,total){ for(var i=0;i<total;i++) delete this._chunks[key+'_'+i]; },
+    setEscudoClub:function(id,b64){ this._escudos=this._escudos||{}; this._escudos[id]=b64; return true; },
     _disc:[],
     getDisciplina:function(){ return this._disc.slice().sort(function(a,b){ return String(b.act||b.fecha).localeCompare(String(a.act||a.fecha)); }); },
+    getConfigEscudos:function(){ if(!this._escudos) return null; return this._escudos; },
     putDisciplina:function(n){ var i=this._disc.findIndex(function(d){ return d.id===n.id; }); if(i>=0)this._disc[i]=JSON.parse(JSON.stringify(n)); else this._disc.push(JSON.parse(JSON.stringify(n))); },
     delDisciplina:function(id){ this._disc=this._disc.filter(function(d){ return d.id!==id; }); },
     putTira:function(x){ var i = tiras.findIndex(function(k){ return k.id === x.id; }); if (i >= 0) tiras[i] = clone(x); else tiras.push(clone(x)); },
@@ -1456,7 +1458,9 @@ async function subirEscudoABT(input){
     S.abt.cfg.clubes = S.cfg.clubes;
     setMsg('');
     var nom=(S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre||clubId;
-    toast('Escudo de '+nom+' guardado'); render();
+    toast('Escudo de '+nom+' guardado');
+    /* refrescar la config del servidor para mostrar el escudo guardado */
+    cargar(); render();
   });
 }
 /* Comprime imagen a JPEG base64 de máximo 45KB usando canvas, luego la manda en chunks */
