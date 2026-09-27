@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v33';
+var VERSION = 'v3.4';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -262,6 +262,30 @@ function statsDe(tiras, cfg, P, anio, sem){
     clubes:orden(CL), arbitros:orden(AR),
     total:tot, pendiente:pend, partidos:np
   };
+}
+/* Calcula el vencimiento de 72hs hábiles (lun-vie 8-20) desde una fecha ISO */
+function vencimientoHabil(isoAct) {
+  var d = new Date(isoAct.replace('T',' ')||Date.now());
+  var horas = 72, MAX_ITER = 5000;
+  while (horas > 0 && MAX_ITER-- > 0) {
+    d = new Date(d.getTime() + 60*60*1000); // sumar 1 hora
+    var dia = d.getDay(); // 0=dom, 6=sab
+    var h = d.getHours();
+    if (dia >= 1 && dia <= 5 && h >= 8 && h < 20) horas--;
+  }
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function horasHabilesRestantes(isoAct, isoVenc) {
+  var ahora_ = new Date(isoAct.replace('T',' ')||Date.now());
+  var venc = new Date(isoVenc.replace('T',' '));
+  if (ahora_ >= venc) return 0;
+  var horas = 0, d = new Date(ahora_.getTime()), MAX_ITER = 5000;
+  while (d < venc && MAX_ITER-- > 0) {
+    d = new Date(d.getTime() + 60*60*1000);
+    var dia = d.getDay(); var h = d.getHours();
+    if (dia >= 1 && dia <= 5 && h >= 8 && h < 20) horas++;
+  }
+  return horas;
 }
 function driveImgURL_(raw){
   var m=raw.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
@@ -502,6 +526,8 @@ function core_handle(action, p, S, ahora){
   var nv = {id: nd.id || uid(), emisor:emisor, clubes:clubsD, notifABT:notifABT,
     texto:txt, fecha:fechaD, estado:estado, act:ahora,
     descargo: vieja ? (vieja.descargo || null) : null};
+  /* calcular vencimiento de 72hs hábiles desde el momento del informe */
+  nv.vencDescargo = vencimientoHabil(ahora);
   S.putDisciplina(nv); return {ok:true, notif:nv};
 }
 case 'borrarNotif': {
@@ -514,6 +540,10 @@ case 'descargo': {
   var notifD = S.getDisciplina().filter(function(x){ return x.id === p.notifId; })[0];
   if (!notifD) err('La notificación no existe.');
   if ((notifD.clubes || []).indexOf(p.club) < 0) err('Esa notificación no te corresponde.');
+  /* verificar plazo hábil */
+  if (notifD.vencDescargo && ahora > notifD.vencDescargo) {
+    err('El plazo para presentar el descargo venció. No se puede presentar descargo fuera de término.');
+  }
   var txtD = String(p.texto || '').trim(); if (!txtD) err('Escribí el texto del descargo.');
   notifD.descargo = {texto:txtD, club:p.club, act:ahora};
   S.putDisciplina(notifD); return {ok:true, notif:notifD};
@@ -635,7 +665,7 @@ function guardarConfig_(p, S, cfg, esABT){
       var o = {id: (r.id && !vistos[r.id]) ? String(r.id) : uid(), nombre: String(r.nombre || '').trim()};
       vistos[o.id] = 1;
       if (!o.nombre) err('Hay una fila sin nombre.');
-      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); var viejo_=(cfg.clubes||[]).filter(function(k){return k.id===o.id;})[0]; var rawNew_=String(r.linkDrive||'').trim(); o.escudo=rawNew_?driveImgURL_(rawNew_):(viejo_?viejo_.escudo||'':''); }
+      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); o.tel = String(r.tel || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); var viejo_=(cfg.clubes||[]).filter(function(k){return k.id===o.id;})[0]; var rawNew_=String(r.linkDrive||'').trim(); o.escudo=rawNew_?driveImgURL_(rawNew_):(viejo_?viejo_.escudo||'':''); }
       if (parte === 'categorias'){ o.arancel = Number(r.arancel); if (r.arancel === '' || isNaN(o.arancel) || o.arancel < 0) err('Revisá el arancel de ' + o.nombre + '.'); o.libre = r.libre === true || r.libre === 'true'; }
       if (parte === 'arbitros'){ o.tel = String(r.tel || '').trim(); }
       return o;
@@ -760,6 +790,30 @@ function escudoFijo(nombre){
     }
   }
   return '';
+}
+function soloNros(t){ var s_='',i=0; for(;i<t.length;i++){if(t[i]>='0'&&t[i]<='9')s_+=t[i];} return s_; }
+function telWA(raw){ var t=soloNros(raw||''); if(t.length<10)return ''; if(t.slice(0,2)!=='54')t='54'+t; return t; }
+function waDiscLink(clubId, textoNotif) {
+  var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
+  var tel = telWA(c && c.tel ? c.tel : ''); if (!tel) return '';
+  var lin1 = '⚖️ *Notificación del Tribunal de Disciplina*';
+  var lin2 = 'Club: *' + (c.nombre||clubId) + '*';
+  var lin3 = 'Informe: ' + textoNotif;
+  var lin4 = 'Tenés *72 horas hábiles* (lun-vie 8-20) para presentar el descargo en la app.';
+  var lin5 = 'Accedé en: https://scbasquet.github.io/cronograma-y-designaciones/';
+  var sep='\n'; var msg = [lin1,sep,lin2,lin3,sep,lin4,lin5].join(sep);
+  return 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
+}
+function waDiscLinkHTD(clubId, textoNotif) {
+  var p_ = S.cfg && S.cfg.params ? S.cfg.params : {};
+  var tel = telWA(p_.telHTD || ''); if (!tel) return '';
+  var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
+  var lin1 = '⚖️ *Notificación del Tribunal de Disciplina*';
+  var lin2 = 'Club: *' + (c?c.nombre:clubId) + '*';
+  var lin3 = 'Informe recibido: ' + textoNotif;
+  var lin4 = 'Presentaremos el descargo dentro del plazo establecido.';
+  var sep2='\n'; var msg = [lin1,sep2,lin2,lin3,sep2,lin4].join(sep2);
+  return 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
 }
 function avisoBanner(t){
   if (!t || !t.aviso) return '';
@@ -1081,14 +1135,33 @@ function disciplinaClubHTML(club){
         '<p class="disc-meta">' + fechaLarga(n.resolucion.act.slice(0,10)) + '</p>' +
         '<p style="font-size:14px;color:var(--tinta)">' + esc(n.resolucion.texto) + '</p></div>';
     }
-    if (tieneDesc && !editDesc){
+    var plazoVenc = n.vencDescargo && !n.descargo && (S.ahora||ahoraLocal()) >= n.vencDescargo;
+    /* cuenta regresiva del plazo */
+    if (n.vencDescargo && !n.descargo) {
+      var horasRest = horasHabilesRestantes(S.ahora||ahoraLocal(), n.vencDescargo);
+      if (horasRest > 0) {
+        cab += '<div class="aviso-red" style="background:#FFF3CD;border-left-color:#F59E0B;margin-top:8px">' +
+          '<b style="color:#92400E">⌛ Plazo para descargo: ' + horasRest + ' hora' + (horasRest!==1?'s':'') + ' hábil' + (horasRest!==1?'es':'') + '</b>' +
+          '<p style="margin:2px 0 0;font-size:13px;color:#78350F">Vence el ' + fechaLarga(n.vencDescargo.slice(0,10)) + ' a las ' + n.vencDescargo.slice(11,16) + 'hs</p></div>';
+      } else {
+        cab += '<div class="aviso-red" style="background:#FEE2E2;border-left-color:#DC2626;margin-top:8px">' +
+          '<b style="color:#991B1B">❌ Plazo vencido</b>' +
+          '<p style="margin:2px 0 0;font-size:13px;color:#7F1D1D">El plazo para presentar el descargo venció. No es posible presentarlo fuera de término.</p></div>';
+      }
+    }
+  if (tieneDesc && !editDesc){
       cab += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">✅ Descargo enviado</h4><p style="margin:4px 0 0;font-size:14px;color:var(--tinta)">' + esc(n.descargo.texto) + '</p></div>';
     }
     if (editDesc){
       cab += '<div style="margin-top:10px"><label style="font-size:14px;color:var(--gris);display:block;margin-bottom:4px">Texto del descargo</label><textarea rows="5" style="display:block;width:100%;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:8px;padding:10px;resize:vertical" oninput="S.descEd.texto=this.value">' + esc(S.descEd.texto) + '</textarea>' +
         '<div class="fila-btn" style="margin-top:8px"><button class="btn" onclick="enviarDescargo(\'' + n.id + '\')">Enviar descargo</button><button class="btn sec" onclick="S.descEd=null;render()">Cancelar</button></div></div>';
     } else if (!tieneDesc){
-      cab += '<div class="fila-btn" style="margin-top:8px"><button class="btn sec chico" onclick="S.descEd={notifId:\'' + n.id + '\',texto:\'\'}; render()">Generar descargo</button></div>';
+      var plazoVenc_ = n.vencDescargo && (S.ahora||ahoraLocal()) >= n.vencDescargo;
+      if (plazoVenc_) {
+        cab += '<div class="fila-btn" style="margin-top:8px"><span style="font-size:13px;color:#991B1B;font-weight:600">❌ Plazo vencido — no es posible presentar descargo</span></div>';
+      } else {
+        cab += '<div class="fila-btn" style="margin-top:8px"><button class="btn sec chico" onclick="S.descEd={notifId:\'' + n.id + '\',texto:\'\'}; render()">Generar descargo</button></div>';
+      }
     }
     return cab + '</div></div>';
   }).join('');
@@ -1333,6 +1406,20 @@ function discCardLeer(n, perfil){
       '<p class="disc-meta">' + fechaLarga(n.resolucion.act.slice(0,10)) + '</p>' +
       '<p style="font-size:14px;color:var(--tinta)">' + esc(n.resolucion.texto) + '</p></div>';
   }
+  /* cuenta regresiva del plazo de descargo */
+  var ahora_ms = new Date(S.ahora||ahoraLocal()).getTime();
+  if (n.vencDescargo && !n.descargo) {
+    var horasR = horasHabilesRestantes(S.ahora||ahoraLocal(), n.vencDescargo);
+    if (horasR > 0) {
+      h += '<div class="aviso-red" style="background:#FFF3CD;border-left-color:#F59E0B">' +
+        '<b style="color:#92400E">⌛ Plazo para descargo: ' + horasR + ' hora' + (horasR!==1?'s':'') + ' hábil' + (horasR!==1?'es':'') + '</b>' +
+        '<p style="margin:2px 0 0;font-size:13px;color:#78350F">Vence el ' + fechaLarga(n.vencDescargo.slice(0,10)) + ' a las ' + n.vencDescargo.slice(11,16) + 'hs</p></div>';
+    } else {
+      h += '<div class="aviso-red" style="background:#FEE2E2;border-left-color:#DC2626">' +
+        '<b style="color:#991B1B">❌ Plazo vencido</b>' +
+        '<p style="margin:2px 0 0;font-size:13px;color:#7F1D1D">El plazo para presentar el descargo venció. No es posible presentarlo fuera de término.</p></div>';
+    }
+  }
   if (n.descargo && n.descargo.texto){
     var dc = n.descargo, dcClub = (S.cfg.clubes||[]).filter(function(k){return k.id===dc.club;})[0];
     h += '<div class="aviso-red" style="margin-top:8px;border-left-color:#1B6E7D;background:#EDF6F8"><h4 style="color:#1B6E7D">📩 Descargo recibido' + (dcClub?' de '+esc(dcClub.nombre):'') + '</h4>' +
@@ -1365,7 +1452,18 @@ async function guardarNotifPanel(){
   var ed = S.discEd, clave = S.colegio || (S.abt && S.abt.clave);
   var r = await api('disciplina', {clave:clave, notif:ed});
   if (!r.ok) return toast(r.error, true);
-  S.discEd = null; toast('Notificación guardada');
+  S.discEd = null;
+  /* WhatsApp automático hacia los clubes afectados */
+  if (r.notif && r.notif.clubes) {
+    r.notif.clubes.forEach(function(clubId, idx){
+      var url = waDiscLink(clubId, r.notif.texto);
+      if (url) {
+        /* pequena demora entre ventanas para evitar bloqueos del browser */
+        setTimeout(function(){ window.open(url, '_blank'); }, idx * 800);
+      }
+    });
+  }
+  toast('Notificación enviada. Se abrirá WhatsApp para cada club.');
   await (S.abt ? cargarDiscABT() : cargarDiscColegio()); render();
 }
 async function borrarNotifPanel(id){
@@ -1491,7 +1589,7 @@ function vABT(){
   var p = S.abt.cfg.params, set = function(k){ return ' oninput="S.abt.cfg.params.' + k + '=this.value"'; };
   var h = bannerAvisos(null);
   h += '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
-    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text']], 'Cada club entra a Mi club con su PIN.', 'Agregar club') +
+    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text'],['tel','Tel. responsable','text']], 'Cada club entra a Mi club con su PIN. El teléfono del responsable se usa para notificaciones de disciplina (solo visible para ABT y Colegio).', 'Agregar club') +
     seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Cualquier categoría se puede cargar cualquier día de la semana.', 'Agregar categoría') +
     seccion('torneos', 'Torneos', [['nombre', 'Nombre del torneo', 'text']], 'Al cargar una tira, el club elige a qué torneo pertenece. Sirve para separar los gastos en las estadísticas.', 'Agregar torneo') +
     seccion('arbitros', 'Árbitros', [['nombre','Nombre','text'],['tel','WhatsApp','tel','2494123456']], 'Teléfono con código de área, sin 0 ni 15, para mandarle sus designaciones.', 'Agregar árbitro') +
@@ -1505,6 +1603,7 @@ function vABT(){
     '<label>Horas antes del partido en que cierra la carga<input type="number" inputmode="numeric" value="' + p.anticipacionHoras + '"' + set('anticipacionHoras') + '></label>' +
     '<label>Horas de anticipación para avisar falta de árbitro<input type="number" inputmode="numeric" value="' + (p.horasAviso || 48) + '"' + set('horasAviso') + '></label>' +
     '<label>Email para avisos automáticos de falta de árbitro<input type="email" value="' + esc(p.emailABT || '') + '" placeholder="correo@ejemplo.com"' + set('emailABT') + '></label>' +
+    '<label>Tel. del HTD (avisos de disciplina)<input value="' + esc(p.telHTD || '') + '" placeholder="2494..." ' + set('telHTD') + '></label>' +
     '<label>Clave del HTD<input value="' + esc(p.claveHTD || 'htd2026') + '" ' + set('claveHTD') + '></label>' +
     '<label>Clave del Colegio<input value="' + esc(p.claveColegio) + '"' + set('claveColegio') + '></label>' +
     '<label>Clave de la ABT<input value="' + esc(p.claveABT) + '"' + set('claveABT') + '></label>' +
