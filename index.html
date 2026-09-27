@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v32';
+var VERSION = 'v33';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -802,6 +802,7 @@ async function cargarAvisos(){
 function baseURL(){ return location.origin + location.pathname; }
 function linkTira(id){ return baseURL() + '?t=' + id; }
 function linkSemana(club, finde, cat){ return baseURL() + '?c=' + club + '&s=' + finde + (cat ? '&k=' + cat : ''); }
+function linkICS(club, cat){ return baseURL() + '?ics=1&c=' + club + (cat ? '&k=' + cat : ''); }
 function bajarICS(texto, nombre){
   var a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([texto], {type:'text/calendar;charset=utf-8'}));
