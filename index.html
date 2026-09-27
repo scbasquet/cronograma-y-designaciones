@@ -119,6 +119,12 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 .badge.res{background:#D4EDDA;color:#155724}
 .badge.ap{background:#CCE5FF;color:#004085}
 .badge.ep{background:#E2E3E5;color:#383D41}
+.aviso-mod{background:#FFF3CD;border-left:4px solid #F59E0B;border-radius:0 8px 8px 0;padding:8px 12px;margin:6px 0 2px;font-size:13px;color:#92400E;display:flex;align-items:center;gap:8px}
+.aviso-mod b{font-size:14px}
+#modal-motivo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:20px}
+#modal-motivo.visible{display:flex}
+#modal-motivo .card{background:#fff;border-radius:16px;padding:22px 20px;width:100%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.18)}
+#modal-motivo h3{margin:0 0 14px;font-size:18px;color:var(--bordo)}
 .btn.cal1{background:#1B6E7D;border-color:#1B6E7D}
 .btn.cal2{background:#fff;color:#1B6E7D;border-color:#1B6E7D}
 .evento .cat .vs{font-weight:400;color:var(--gris);font-size:14px}
@@ -156,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v30';
+var VERSION = 'v32';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -407,6 +413,26 @@ function core_handle(action, p, S, ahora){
       var nom = (cb ? cb.nombre : 'ABT Tandil') + (kb ? ' · ' + kb.nombre : '') + ' · Básquet';
       return {ok:true, ics:icsDe(nom, eventosDe(S.getTiras(''), cfg, P, p.club || '', p.cat || ''), ahora)};
     }
+    case 'guardarAviso': {
+      var tiraA = S.getTira(p.id);
+      if (!tiraA) err('Tira no encontrada.');
+      var quienA = '';
+      if (p.pin) {
+        var clubA = (cfg.clubes || []).filter(function(k){ return k.id === tiraA.local; })[0];
+        if (!clubA || String(clubA.pin) !== String(p.pin)) err('PIN incorrecto.');
+        quienA = clubA.nombre;
+      } else if (esABT(p.clave)) {
+        quienA = 'ABT';
+      } else if (esColegio(p.clave)) {
+        quienA = 'Colegio';
+      } else {
+        err('Clave incorrecta.');
+      }
+      var textoA = String(p.texto || '').trim();
+      tiraA.aviso = textoA ? {texto:textoA, quien:quienA, act:ahora} : null;
+      S.putTira(tiraA);
+      return {ok:true, tira:tiraA};
+    }
     case 'loginHTD': {
       if (!esHTD(p.clave)) err('Clave incorrecta.');
       return {ok:true, notifs:S.getDisciplina()};
@@ -526,7 +552,13 @@ case 'descargo': {
       var a1 = p.a1 || '', a2 = p.a2 || '';
       if ((a1 && !ids[a1]) || (a2 && !ids[a2])) err('Ese árbitro no está en la lista.');
       if (a1 && a1 === a2) err('No puede ser el mismo árbitro en las dos funciones.');
-      x.a1 = a1; x.a2 = a2; S.putTira(td); return {ok:true};
+      var prevA1 = x.a1, prevA2 = x.a2;
+      x.a1 = a1; x.a2 = a2;
+      if (p.motivo && (prevA1 !== a1 || prevA2 !== a2)) {
+        var dia__ = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][new Date(td.fecha+'T12:00').getDay()];
+        td.aviso = {texto:'Partido modificado el '+dia__+' · '+String(p.motivo).trim(), quien:'Colegio', act:ahora};
+      }
+      S.putTira(td); return {ok:true, tira:td};
     }
     case 'pago': {
       if (!esColegio(p.clave)) err('Clave del Colegio incorrecta.');
@@ -571,6 +603,13 @@ function guardarTira_(p, S, cfg, P, ahora, c){
   var n = {id: prev ? prev.id : uid(), local:c.id, rivalId:rivalId, rivalTxt:rivalTxt, fecha:t.fecha, finde:fin, sede:sede, torneo:torneo, partidos:partidos, pagada:false, monto:0, act:ahora};
   var cn = cierreTira(n, P);
   if (ahora >= cn) err('Ya no se puede cargar para ese día: la carga cerró el ' + cn.slice(8,10) + '/' + cn.slice(5,7) + ' a las ' + cn.slice(11) + '.');
+  /* aviso automático si viene motivo (edición) */
+  if (p.motivo && prev) {
+    var hora_ = ahora.slice(11,16);
+    var dia_ = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][new Date(n.fecha+'T12:00').getDay()];
+    var quien_ = c ? c.nombre : 'Club';
+    n.aviso = {texto: 'Partido modificado el '+dia_+' · '+String(p.motivo).trim(), quien:quien_, act:ahora};
+  }
   S.putTira(n);
   return {ok:true, tira:n};
 }
@@ -610,7 +649,7 @@ function guardarConfig_(p, S, cfg, esABT){
 var DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 function ahoraLocal(){ var d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
-var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null, htd:null, htdClave:null, htdEd:null};
+var S = {tab:'cartelera', finde:findeActual(ahoraLocal().slice(0,10)), cfg:null, tiras:[], ahora:ahoraLocal(), filtro:'', club:null, edit:null, borrar:null, colegio:null, colArb:null, abt:null, stats:null, sclave:null, inv:null, invId:'', disc:null, discABT:null, discEd:null, descEd:null, htd:null, htdClave:null, htdEd:null, avisoEd:null};
 
 /* ---------- Modo demo: mismo núcleo que el servidor, datos en memoria ---------- */
 var MOCK = (function(){
@@ -722,6 +761,12 @@ function escudoFijo(nombre){
   }
   return '';
 }
+function avisoBanner(t){
+  if (!t || !t.aviso) return '';
+  var hora = t.aviso.act ? t.aviso.act.slice(11,16) : '';
+  return '<div class="aviso-mod">&#9888;&#65039; <div><b>' + esc(t.aviso.texto) + '</b>' +
+    '<div style="margin-top:2px;opacity:.8">Modificado por ' + esc(t.aviso.quien) + (hora?' a las '+hora:'') + '</div></div></div>';
+}
 function escudoURL(clubId){
   var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
   if (c && c.escudo) return 'data:image/jpeg;base64,' + c.escudo;
@@ -831,6 +876,7 @@ function moverFinde(n){ S.finde = addDias(S.finde, 7*n); S.edit = null; S.borrar
 function salir(k){ S[k] = null; S.verPin = false; if (k === 'colegio') S.colArb = null; if (k === 'club') S.edit = null; render(); 
   if (k === 'abt' || k === 'colegio'){ S.discABT = null; S.discEd = null; }
   if (k === 'htd'){ S.htd = null; S.htdClave = null; S.htdEd = null; }
+  S.avisoEd = null;
   S.disc = null;
 }
 function render(){
@@ -853,10 +899,11 @@ function tiraHTML(t, o){
   }).join('');
   var local = t.local, rival = t.rivalId;
   var cabEsc = (escudoImg(local,42) || '') + '<div style="flex:1"><h3>' + esc(titulo(t)) + '</h3><div class="sub">' + esc(t.sede) + '</div></div>' + (rival ? escudoImg(rival,42) : '<div style="width:42px"></div>');
+  if (o.extra) h = '<article class="tira">' + o.extra + '<div class="tira-cab" style="display:flex;align-items:center;gap:10px">' + cabEsc + '</div>'; 
   var pie = o.pie != null ? o.pie : '<span class="acciones">' +
     '<a class="btn cal2 chico" target="_blank" rel="noopener" href="https://wa.me/?text=' +
       encodeURIComponent(titulo(t) + ' – ' + fechaLarga(t.fecha) + '\n' + t.sede + '\nAgregá los partidos a tu calendario: ' + linkTira(t.id)) + '">Calendario</a></span>';
-  return '<article class="tira"><div class="tira-cab" style="display:flex;align-items:center;gap:10px">' + cabEsc + '</div>' + filas + (pie ? '<div class="pie">' + pie + '</div>' : '') + '</article>';
+  return '<article class="tira">' + avisoBanner(t) + '<div class="tira-cab" style="display:flex;align-items:center;gap:10px">' + cabEsc + '</div>' + filas + (pie ? '<div class="pie">' + pie + '</div>' : '') + '</article>';
 }
 
 /* ---------- Cartelera pública ---------- */
@@ -922,8 +969,10 @@ function vClub(){
   h += mias.length ? mias.map(function(t){
     var ed = S.ahora < cierreTira(t, P()) && !t.pagada;
     var pie = '<span><span class="estado' + (t.pagada ? ' ok' : '') + '">' + (t.pagada ? 'Pagada' : 'Pendiente') + '</span> <span class="monto">' + plata(t.pagada ? t.monto : totalTira(t, S.cfg, P())) + '</span></span>' +
-      (ed ? '<span class="acciones"><button class="btn sec chico" onclick="editarTira(\'' + t.id + '\')">Editar</button><button class="btn chico ' + (S.borrar === t.id ? 'peligro' : 'sec') + '" onclick="borrarTira(\'' + t.id + '\')">' + (S.borrar === t.id ? 'Tocá de nuevo para borrar' : 'Borrar') + '</button></span>' : '');
-    return tiraHTML(t, {costos:true, pie:pie});
+      (ed ? '<span class="acciones"><button class="btn sec chico" onclick="editarTira(\'' + t.id + '\')">Editar</button><button class="btn chico ' + (S.borrar === t.id ? 'peligro' : 'sec') + '" onclick="borrarTira(\'' + t.id + '\')">' + (S.borrar === t.id ? 'Tocá de nuevo para borrar' : 'Borrar') + '</button></span>' : '') +
+        '<span class="acciones"><button class="btn sec chico" style="border-color:#F59E0B;color:#92400E" onclick="S.avisoEd=S.avisoEd===\''+t.id+'\' ? null : \''+t.id+'\';render()">&#9888; Aviso</button></span>' +
+        (S.avisoEd===t.id ? avisoEditorHTML(t.id, t.aviso ? t.aviso.texto : '') : '');
+    return tiraHTML(t, {costos:true, pie:pie, extra: avisoBanner(t)});
   }).join('') : '<p class="vacio">No hay tiras de local cargadas para esta semana.</p>';
   h += escudoClubHTML(c) + calendariosHTML(c) + pinHTML() + disciplinaClubHTML(c);
   if (vis.length) h += '<h2 class="dia">De visitante</h2>' + vis.map(function(t){ return tiraHTML(t, {pie:'<span>Paga el local</span>'}); }).join('');
@@ -966,6 +1015,53 @@ function escudoClubHTML(club){
     escudoImg(club, 52) + '<span class="sub">Escudo de ' + esc(clubNom(club)) + '</span></div>';
 }
 
+async function guardarAvisoClub(tiraId, pin, clubId){
+  var inp = document.getElementById('aviso_txt_'+tiraId);
+  if (!inp) return;
+  var r = await api('guardarAviso', {id:tiraId, pin:pin});
+  /* abrir editor */
+  S.avisoEd = S.avisoEd === tiraId ? null : tiraId; render();
+}
+async function enviarAviso(tiraId){
+  var inp = document.getElementById('aviso_txt_'+tiraId);
+  var txt = inp ? inp.value.trim() : '';
+  var params = {id:tiraId, texto:txt};
+  if (S.club) params.pin = S.club.pin;
+  else params.clave = S.colegio ? S.colegio.clave : (S.abt ? S.abt.clave : '');
+  var r = await api('guardarAviso', params);
+  if (!r.ok) return toast(r.error, true);
+  S.tiras = S.tiras.map(function(t){ return t.id===tiraId ? r.tira : t; });
+  S.avisoEd = null; toast(txt ? 'Aviso publicado' : 'Aviso borrado'); render();
+}
+async function enviarAvisoClub(tiraId, clubId){
+  var inp = document.getElementById('aviso_txt_'+tiraId);
+  var txt = inp ? inp.value.trim() : '';
+  var r = await api('guardarAviso', {id:tiraId, pin:S.club.pin, texto:txt});
+  if (!r.ok) return toast(r.error, true);
+  S.tiras = S.tiras.map(function(t){ return t.id===tiraId ? r.tira : t; });
+  S.avisoEd = null; toast(txt ? 'Aviso publicado' : 'Aviso borrado'); render();
+}
+async function enviarAvisoColegio(tiraId){
+  var inp = document.getElementById('aviso_txt_'+tiraId);
+  var txt = inp ? inp.value.trim() : '';
+  var clave = S.colegio ? S.colegio.clave : (S.abt ? S.abt.clave : '');
+  var r = await api('guardarAviso', {id:tiraId, clave:clave, texto:txt});
+  if (!r.ok) return toast(r.error, true);
+  S.tiras = S.tiras.map(function(t){ return t.id===tiraId ? r.tira : t; });
+  S.avisoEd = null; toast(txt ? 'Aviso publicado' : 'Aviso borrado'); render();
+}
+function avisoEditorHTML(tiraId, textoActual){
+  var abierto = S.avisoEd === tiraId;
+  if (!abierto) return '';
+  return '<div style="padding:10px 14px;background:#FFFBEB;border-top:1px solid #FDE68A">' +
+    '<label style="font-size:13px;color:#92400E;display:block;margin-bottom:4px">Texto del aviso (dejalo vacío para borrarlo)</label>' +
+    '<textarea id="aviso_txt_'+tiraId+'" rows="2" style="display:block;width:100%;font:15px Barlow,system-ui,sans-serif;border:1px solid #FDE68A;border-radius:8px;padding:8px;resize:none;background:#fff">' +
+    esc(textoActual||'') + '</textarea>' +
+    '<div class="fila-btn" style="margin-top:8px">' +
+    '<button class="btn chico" style="background:#F59E0B;border-color:#F59E0B" onclick="enviarAviso(\''+tiraId+'\')">Publicar aviso</button>' +
+    '<button class="btn sec chico" onclick="S.avisoEd=null;render()">Cancelar</button>' +
+    '</div></div>';
+}
 function disciplinaClubHTML(club){
   if (!S.disc) return '';
   var L = (S.disc || []).filter(function(n){ return (n.clubes || []).indexOf(club) >= 0; });
@@ -1083,10 +1179,16 @@ function vEditor(){
     '<div class="fila-btn"><button class="btn" id="bguardar" onclick="guardarTira()">Guardar tira</button><button class="btn sec" onclick="S.edit=null;render()">Cancelar</button></div></section>';
 }
 async function guardarTira(){
-  var e = S.edit, b = $('#bguardar'); b.disabled = true; b.textContent = 'Guardando…';
-  var r = await api('guardarTira', {club:S.club.id, pin:S.club.pin, tira:{id:e.id, fecha:e.fecha, sede:e.sede, torneo:e.torneo || '', rivalId:e.otro ? '' : e.rivalId, rivalTxt:e.otro ? e.rivalTxt : '',
+  var e = S.edit; if (!e) return;
+  /* si es edición pedir motivo; si es nueva, guardar directo */
+  if (e.id) { pedirMotivo(function(motivo){ _enviarTira(motivo); }); return; }
+  _enviarTira('');
+}
+async function _enviarTira(motivo){
+  var e = S.edit, b = $('#bguardar'); if(b){ b.disabled = true; b.textContent = 'Guardando…'; }
+  var r = await api('guardarTira', {club:S.club.id, pin:S.club.pin, motivo:motivo||'', tira:{id:e.id, fecha:e.fecha, sede:e.sede, torneo:e.torneo || '', rivalId:e.otro ? '' : e.rivalId, rivalTxt:e.otro ? e.rivalTxt : '',
     partidos:e.partidos.map(function(x){ return {id:x.id || '', cat:x.cat, hora:x.hora}; })}});
-  if (!r.ok){ toast(r.error, true); b.disabled = false; b.textContent = 'Guardar tira'; return; }
+  if (!r.ok){ toast(r.error, true); if(b){ b.disabled = false; b.textContent = 'Guardar tira'; } return; }
   S.edit = null; toast('Tira guardada'); cargar();
 }
 async function borrarTira(id){
@@ -1128,8 +1230,11 @@ function vColegio(){
           return '<div class="fila' + (c ? ' alerta' : '') + '"><div class="hora">' + x.hora + '</div><div style="grid-column:span 2"><div class="cat">' + esc(catNom(x.cat)) + ' <span class="costo">' + plata(costo(x)) + '</span></div>' +
             '<div class="dos">' + selArb(t.id, x, 1) + selArb(t.id, x, 2) + '</div>' + (c ? '<div class="msg">' + c.map(esc).join('<br>') + '</div>' : '') + '</div></div>';
         }).join('') +
+        avisoBanner(t) +
         '<div class="pie"><span><span class="estado' + (t.pagada ? ' ok' : '') + '">' + (t.pagada ? 'Pagada' : 'Pendiente') + '</span> <span class="monto">' + plata(t.pagada ? t.monto : totalTira(t, S.cfg, P())) + '</span></span>' +
-        '<button class="btn sec chico" onclick="marcarPago(\'' + t.id + '\',' + !t.pagada + ')">' + (t.pagada ? 'Volver a pendiente' : 'Marcar pagada') + '</button></div></article>';
+        '<button class="btn sec chico" style="border-color:#F59E0B;color:#92400E" onclick="S.avisoEd=S.avisoEd===\''+t.id+'\' ? null : \''+t.id+'\';render()">&#9888; Aviso</button>' +
+        '<button class="btn sec chico" onclick="marcarPago(\'' + t.id + '\',' + !t.pagada + ')">' + (t.pagada ? 'Volver a pendiente' : 'Marcar pagada') + '</button></div>' +
+        avisoEditorHTML(t.id, t.aviso ? t.aviso.texto : '') + '</article>';
     });
   });
   return h + resumenArbitros() + resumenCobro() + vDiscColegio();
@@ -1155,9 +1260,18 @@ function resumenCobro(){
 }
 async function designar(tid, pid, n, val){
   var t = buscar(S.tiras, tid), x = buscar(t.partidos, pid), ant = {a1:x.a1, a2:x.a2};
+  var prevArb = n===1 ? x.a1 : x.a2;
   x['a' + n] = val; render();
-  var r = await api('designar', {clave:S.colegio, tiraId:tid, partidoId:pid, a1:x.a1, a2:x.a2});
+  if (prevArb && prevArb !== val) {
+    pedirMotivo(function(motivo){ _enviarDesignar(tid, pid, x, ant, motivo); });
+    return;
+  }
+  _enviarDesignar(tid, pid, x, ant, '');
+}
+async function _enviarDesignar(tid, pid, x, ant, motivo){
+  var r = await api('designar', {clave:S.colegio, tiraId:tid, partidoId:pid, a1:x.a1, a2:x.a2, motivo:motivo||''});
   if (!r.ok){ x.a1 = ant.a1; x.a2 = ant.a2; render(); return toast(r.error, true); }
+  if (r.tira){ S.tiras = S.tiras.map(function(t){ return t.id===tid ? r.tira : t; }); render(); }
   toast('Designación guardada');
 }
 async function marcarPago(tid, val){
@@ -1506,6 +1620,36 @@ function vHTD(){
   }).join('');
   return h;
 }
+/* ---------- Modal de motivo de cambio ---------- */
+var _motivoCb = null; /* callback que se llama cuando el usuario confirma */
+
+function pedirMotivo(cb){
+  _motivoCb = cb;
+  document.getElementById('mot-sel').value = '';
+  document.getElementById('mot-txt').value = '';
+  document.getElementById('mot-txt').style.display = 'none';
+  document.getElementById('modal-motivo').classList.add('visible');
+  document.getElementById('mot-sel').focus();
+}
+function motivoSelChange(val){
+  var txt = document.getElementById('mot-txt');
+  txt.style.display = (val === 'otro' || val === '') ? (val === 'otro' ? 'block' : 'none') : 'none';
+  if (val === 'otro') txt.focus();
+}
+function motivoConfirmar(){
+  var sel = document.getElementById('mot-sel').value;
+  var txt = document.getElementById('mot-txt').value.trim();
+  var motivo = sel === 'otro' ? txt : sel;
+  if (!motivo){ toast('El motivo es obligatorio.', true); return; }
+  document.getElementById('modal-motivo').classList.remove('visible');
+  if (_motivoCb) _motivoCb(motivo);
+  _motivoCb = null;
+}
+function motivoCancelar(){
+  document.getElementById('modal-motivo').classList.remove('visible');
+  _motivoCb = null;
+}
+
 /* ---------- Arranque y actualización en vivo ---------- */
 (function(){
   var q = {}, re = /[?&](t|c|s|k)=([\w-]+)/g, m;
@@ -1516,5 +1660,25 @@ function vHTD(){
 setInterval(function(){ if (!document.hidden && !S.edit && (S.tab === 'cartelera' || S.tab === 'colegio')) cargar(true); }, 60000);
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && !S.edit) setTimeout(function(){ cargar(true); }, 1500); });
 </script>
+<div id="modal-motivo" role="dialog" aria-modal="true">
+  <div class="card">
+    <h3>&#9888;&#65039; ¿Por qué se modifica?</h3>
+    <p class="sub" style="margin:-6px 0 14px">El motivo aparece en la cartelera como aviso.</p>
+    <select id="mot-sel" style="display:block;width:100%;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:10px;padding:12px;min-height:48px;margin-bottom:10px" onchange="motivoSelChange(this.value)">
+      <option value="">Elegí un motivo…</option>
+      <option value="Partido suspendido">Partido suspendido</option>
+      <option value="Cambio de sede">Cambio de sede</option>
+      <option value="Cambio de horario">Cambio de horario</option>
+      <option value="Cambio de árbitros">Cambio de árbitros</option>
+      <option value="Partido reprogramado">Partido reprogramado</option>
+      <option value="otro">Otro motivo…</option>
+    </select>
+    <textarea id="mot-txt" rows="2" placeholder="Describí el motivo (obligatorio)" style="display:none;width:100%;font:16px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:10px;padding:12px;resize:none;margin-bottom:14px"></textarea>
+    <div class="fila-btn">
+      <button class="btn" onclick="motivoConfirmar()">Confirmar cambio</button>
+      <button class="btn sec" onclick="motivoCancelar()">Cancelar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
