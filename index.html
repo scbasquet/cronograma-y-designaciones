@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v3.4';
+var VERSION = 'v3.5';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -437,6 +437,18 @@ function core_handle(action, p, S, ahora){
       var nom = (cb ? cb.nombre : 'ABT Tandil') + (kb ? ' · ' + kb.nombre : '') + ' · Básquet';
       return {ok:true, ics:icsDe(nom, eventosDe(S.getTiras(''), cfg, P, p.club || '', p.cat || ''), ahora)};
     }
+    case 'guardarTelClub': {
+      if (!esABT(p.clave)) err('Clave incorrecta.');
+      var clubTel = String(p.club || '').trim();
+      var tel = String(p.tel || '').trim();
+      var listaT = (cfg.clubes || []).map(function(k){
+        if (k.id !== clubTel) return k;
+        return Object.assign({}, k, {tel: tel});
+      });
+      if (!listaT.some(function(k){ return k.id === clubTel; })) err('Ese club no existe.');
+      S.setConfig('clubes', listaT);
+      return {ok:true};
+    }
     case 'guardarAviso': {
       var tiraA = S.getTira(p.id);
       if (!tiraA) err('Tira no encontrada.');
@@ -665,7 +677,7 @@ function guardarConfig_(p, S, cfg, esABT){
       var o = {id: (r.id && !vistos[r.id]) ? String(r.id) : uid(), nombre: String(r.nombre || '').trim()};
       vistos[o.id] = 1;
       if (!o.nombre) err('Hay una fila sin nombre.');
-      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); o.tel = String(r.tel || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); var viejo_=(cfg.clubes||[]).filter(function(k){return k.id===o.id;})[0]; var rawNew_=String(r.linkDrive||'').trim(); o.escudo=rawNew_?driveImgURL_(rawNew_):(viejo_?viejo_.escudo||'':''); }
+      if (parte === 'clubes'){ o.pin = String(r.pin || '').trim(); o.sede = String(r.sede || '').trim(); if (!o.pin) err('Falta el PIN de ' + o.nombre + '.'); var viejo_=(cfg.clubes||[]).filter(function(k){return k.id===o.id;})[0]; var rawNew_=String(r.linkDrive||'').trim(); o.escudo=rawNew_?driveImgURL_(rawNew_):(viejo_?viejo_.escudo||'':''); o.tel=viejo_?viejo_.tel||'':''; }
       if (parte === 'categorias'){ o.arancel = Number(r.arancel); if (r.arancel === '' || isNaN(o.arancel) || o.arancel < 0) err('Revisá el arancel de ' + o.nombre + '.'); o.libre = r.libre === true || r.libre === 'true'; }
       if (parte === 'arbitros'){ o.tel = String(r.tel || '').trim(); }
       return o;
@@ -820,6 +832,29 @@ function avisoBanner(t){
   var hora = t.aviso.act ? t.aviso.act.slice(11,16) : '';
   return '<div class="aviso-mod">&#9888;&#65039; <div><b>' + esc(t.aviso.texto) + '</b>' +
     '<div style="margin-top:2px;opacity:.8">Modificado por ' + esc(t.aviso.quien) + (hora?' a las '+hora:'') + '</div></div></div>';
+}
+function telefonosPanelABT(){
+  if (!S.abt) return '';
+  var h = '<section class="panel"><h2>Teléfonos de responsables</h2>' +
+    '<p class="nota" style="margin:-4px 0 12px">Número de WhatsApp del responsable de cada club. Se usa para notificaciones del Tribunal de Disciplina. Solo visible para la ABT y el Colegio.</p>';
+  (S.cfg.clubes || []).forEach(function(c){
+    h += '<div class="cfila" style="align-items:center;gap:10px;padding:8px 0">' +
+      '<span style="flex:1;font-weight:600">'+esc(c.nombre)+'</span>' +
+      '<input id="tel_'+c.id+'" type="tel" placeholder="2494..." value="'+esc(c.tel||'')+'" style="width:140px;font:15px Barlow,system-ui,sans-serif;border:1px solid #BFC8D3;border-radius:8px;padding:9px 10px">' +
+      '<button class="btn sec chico" style="margin:0;cursor:pointer" data-id="'+c.id+'" onclick="guardarTelClub(this.dataset.id)">Guardar</button>' +
+      '</div>';
+  });
+  return h + '</section>';
+}
+async function guardarTelClub(clubId){
+  var inp = document.getElementById('tel_'+clubId);
+  var tel = inp ? inp.value.trim() : '';
+  var r = await api('guardarTelClub', {clave:S.abt.clave, club:clubId, tel:tel});
+  if (!r.ok) return toast(r.error, true);
+  S.cfg.clubes = S.cfg.clubes.map(function(c){ return c.id===clubId ? Object.assign({},c,{tel:tel}) : c; });
+  if (S.abt) S.abt.cfg.clubes = S.cfg.clubes;
+  var nom=(S.cfg.clubes.filter(function(c){return c.id===clubId;})[0]||{}).nombre||clubId;
+  toast('Teléfono de '+nom+' guardado');
 }
 function escudoURL(clubId){
   var c = S.cfg ? (S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0] : null;
@@ -1589,7 +1624,8 @@ function vABT(){
   var p = S.abt.cfg.params, set = function(k){ return ' oninput="S.abt.cfg.params.' + k + '=this.value"'; };
   var h = bannerAvisos(null);
   h += '<div class="cabclub"><div><h2>Configuración de la ABT</h2><p class="sub">Cada sección se aplica cuando tocás su botón Guardar.</p></div><button class="btn sec chico" onclick="salir(\'abt\')">Salir</button></div>' +
-    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text'],['tel','Tel. responsable','text']], 'Cada club entra a Mi club con su PIN. El teléfono del responsable se usa para notificaciones de disciplina (solo visible para ABT y Colegio).', 'Agregar club') +
+    seccion('clubes', 'Clubes', [['nombre','Nombre','text'],['pin','PIN','text'],['sede','Sede habitual','text']], 'Cada club entra a Mi club con su PIN.', 'Agregar club') +
+    telefonosPanelABT() +
     seccion('categorias', 'Categorías', [['nombre','Categoría','text'],['arancel','Arancel por árbitro ($)','number']], 'El costo de cada partido es el arancel × ' + p.arbitrosPorPartido + ' árbitros. Cualquier categoría se puede cargar cualquier día de la semana.', 'Agregar categoría') +
     seccion('torneos', 'Torneos', [['nombre', 'Nombre del torneo', 'text']], 'Al cargar una tira, el club elige a qué torneo pertenece. Sirve para separar los gastos en las estadísticas.', 'Agregar torneo') +
     seccion('arbitros', 'Árbitros', [['nombre','Nombre','text'],['tel','WhatsApp','tel','2494123456']], 'Teléfono con código de área, sin 0 ni 15, para mandarle sus designaciones.', 'Agregar árbitro') +
@@ -1603,6 +1639,7 @@ function vABT(){
     '<label>Horas antes del partido en que cierra la carga<input type="number" inputmode="numeric" value="' + p.anticipacionHoras + '"' + set('anticipacionHoras') + '></label>' +
     '<label>Horas de anticipación para avisar falta de árbitro<input type="number" inputmode="numeric" value="' + (p.horasAviso || 48) + '"' + set('horasAviso') + '></label>' +
     '<label>Email para avisos automáticos de falta de árbitro<input type="email" value="' + esc(p.emailABT || '') + '" placeholder="correo@ejemplo.com"' + set('emailABT') + '></label>' +
+    '<label>Tel. de la ABT (recibe todos los avisos)<input value="' + esc(p.telABT || '') + '" placeholder="2494..." ' + set('telABT') + '></label>' +
     '<label>Tel. del HTD (avisos de disciplina)<input value="' + esc(p.telHTD || '') + '" placeholder="2494..." ' + set('telHTD') + '></label>' +
     '<label>Clave del HTD<input value="' + esc(p.claveHTD || 'htd2026') + '" ' + set('claveHTD') + '></label>' +
     '<label>Clave del Colegio<input value="' + esc(p.claveColegio) + '"' + set('claveColegio') + '></label>' +
@@ -1759,6 +1796,75 @@ function motivoCancelar(){
 })();
 setInterval(function(){ if (!document.hidden && !S.edit && (S.tab === 'cartelera' || S.tab === 'colegio')) cargar(true); }, 60000);
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && !S.edit) setTimeout(function(){ cargar(true); }, 1500); });
+/* === Avisos WA a la ABT (v3.5) === */
+(function(){
+  function _telWA(t){var s='',i=0;for(;i<t.length;i++){if(t[i]>='0'&&t[i]<='9')s+=t[i];}return s.length<10?'':(s.slice(0,2)!=='54'?'54'+s:s);}
+  window.waABT = function(msg){
+    var p_=S.cfg&&S.cfg.params?S.cfg.params:{};
+    var tel=_telWA(p_.telABT||''); if(!tel)return;
+    setTimeout(function(){window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');},700);
+  };
+  /* parchar guardarNotifPanel */
+  var _orig_gnp = window.guardarNotifPanel;
+  window.guardarNotifPanel = async function(){
+    var ed=S.discEd, clave=S.colegio||(S.abt&&S.abt.clave);
+    var r=await api('disciplina',{clave:clave,notif:ed});
+    if(!r.ok)return toast(r.error,true);
+    S.discEd=null;
+    if(r.notif&&r.notif.clubes){r.notif.clubes.forEach(function(id,i){var u=waDiscLink(id,r.notif.texto);if(u)setTimeout(function(){window.open(u,'_blank');},i*800);});}
+    var nl=String.fromCharCode(10);
+    var emisor=S.abt?'ABT':'Colegio de Arbitros';
+    var clubes=(r.notif.clubes||[]).map(function(id){var c=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0];return c?c.nombre:id;}).join(', ');
+    waABT('[Disciplina ABT]'+nl+'Informe - '+emisor+nl+'Club/s: '+clubes+nl+'Texto: '+r.notif.texto);
+    toast('Notificacion enviada.');
+    await(S.abt?cargarDiscABT():cargarDiscColegio()); render();
+  };
+  /* parchar enviarDescargo */
+  window.enviarDescargo = async function(notifId){
+    var txt=(S.descEd&&S.descEd.texto||'').trim();
+    if(!txt)return toast('Escribi el texto del descargo.',true);
+    var r=await api('descargo',{club:S.club.id,pin:S.club.pin,notifId:notifId,texto:txt});
+    if(!r.ok)return toast(r.error,true);
+    S.descEd=null; toast('Descargo enviado'); cargar();
+    var nl=String.fromCharCode(10);
+    var club=(S.cfg.clubes||[]).filter(function(c){return c.id===S.club.id;})[0];
+    waABT('[Disciplina ABT]'+nl+'Descargo presentado'+nl+'Club: '+(club?club.nombre:S.club.id)+nl+'Texto: '+txt);
+  };
+  /* parchar guardarResolucion */
+  window.guardarResolucion = async function(notifId){
+    var ed=S.htdEd; if(!ed)return;
+    var txt=(ed.texto||'').trim(); if(!txt)return toast('Escribi el texto de la resolucion.',true);
+    var r=await api('resolucion',{clave:S.htdClave,notifId:notifId,texto:txt,estado:ed.estado||'en proceso'});
+    if(!r.ok)return toast(r.error,true);
+    S.htdEd=null; toast('Resolucion guardada');
+    var nl=String.fromCharCode(10);
+    var est=r.notif&&r.notif.resolucion?r.notif.resolucion.estado:'actualizado';
+    waABT('[Disciplina ABT]'+nl+'Resolucion del HTD'+nl+'Estado: '+est);
+    await recargarHTD(); render();
+  };
+  /* parchar _enviarTira para aviso de tira cargada/editada */
+  var _pti=setInterval(function(){
+    if(!window._enviarTira)return;
+    clearInterval(_pti);
+    var _o=window._enviarTira;
+    window._enviarTira=async function(motivo){
+      if(S.edit)S.edit._motivo=motivo||'';
+      var snap=JSON.parse(JSON.stringify(S.edit||{}));
+      await _o.call(this,motivo);
+      var nl=String.fromCharCode(10);
+      var club=(S.cfg.clubes||[]).filter(function(c){return c.id===snap.local;})[0];
+      var rival=snap.rivalId?(S.cfg.clubes||[]).filter(function(c){return c.id===snap.rivalId;})[0]:null;
+      var cats=(snap.partidos||[]).map(function(x){return x.hora+' '+x.cat;}).join(', ');
+      var msg='[Cartelera ABT]'+nl+(snap.id?'Tira editada':'Tira cargada')+nl+
+        'Club: '+(club?club.nombre:'?')+' vs '+(rival?rival.nombre:(snap.rivalTxt||'?'))+nl+
+        'Fecha: '+(snap.fecha?fechaLarga(snap.fecha):'')+' / '+(snap.sede||'')+nl+
+        'Partidos: '+cats;
+      if(snap.id&&snap._motivo)msg+=nl+'Motivo: '+snap._motivo;
+      waABT(msg);
+    };
+  },200);
+})();
+
 </script>
 <div id="modal-motivo" role="dialog" aria-modal="true">
   <div class="card">
