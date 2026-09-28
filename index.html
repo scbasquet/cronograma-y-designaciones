@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v3.6';
+var VERSION = 'v3.7';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -1058,7 +1058,7 @@ function vClub(){
   h += '<h2 class="dia">De local</h2>';
   h += mias.length ? mias.map(function(t){
     var ed = S.ahora < cierreTira(t, P()) && !t.pagada;
-    var pie = '<span><span class="estado' + (t.pagada ? ' ok' : '') + '">' + (t.pagada ? 'Pagada' : 'Pendiente') + '</span> <span class="monto">' + plata(t.pagada ? t.monto : totalTira(t, S.cfg, P())) + '</span></span>' +
+    var pie = '<span><span class="monto">' + plata(t.pagada ? t.monto : totalTira(t, S.cfg, P())) + '</span></span>' +
       (ed ? '<span class="acciones"><button class="btn sec chico" onclick="editarTira(\'' + t.id + '\')">Editar</button><button class="btn chico ' + (S.borrar === t.id ? 'peligro' : 'sec') + '" onclick="borrarTira(\'' + t.id + '\')">' + (S.borrar === t.id ? 'Tocá de nuevo para borrar' : 'Borrar') + '</button></span>' : '') +
         '<span class="acciones"><button class="btn sec chico" style="border-color:#F59E0B;color:#92400E" onclick="S.avisoEd=S.avisoEd===\''+t.id+'\' ? null : \''+t.id+'\';render()">&#9888; Aviso</button></span>' +
         (S.avisoEd===t.id ? avisoEditorHTML(t.id, t.aviso ? t.aviso.texto : '') : '');
