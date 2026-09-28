@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v3.7';
+var VERSION = 'v3.8';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -1796,7 +1796,7 @@ function motivoCancelar(){
 })();
 setInterval(function(){ if (!document.hidden && !S.edit && (S.tab === 'cartelera' || S.tab === 'colegio')) cargar(true); }, 60000);
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && !S.edit) setTimeout(function(){ cargar(true); }, 1500); });
-/* === Avisos WA a la ABT (v3.6) === */
+/* === Avisos WA obligatorios ANTES de confirmar (v3.8) === */
 (function(){
 
   function _telWA(t){
@@ -1805,117 +1805,162 @@ document.addEventListener('visibilitychange', function(){ if (!document.hidden &
     return s.length<10?'':(s.slice(0,2)!=='54'?'54'+s:s);
   }
 
-  /* Modal WA obligatorio — no se puede cerrar sin tocar Enviar */
-  window._waModal = function(mensajes) {
-    /* mensajes = [{tel, msg, label}] */
-    var modal = document.getElementById('wa-modal-abt');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'wa-modal-abt';
-      modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;align-items:center;justify-content:center;padding:20px';
-      document.body.appendChild(modal);
+  /* Crea o reutiliza el modal */
+  function _getModal(){
+    var m=document.getElementById('wa-modal-abt');
+    if(!m){
+      m=document.createElement('div');
+      m.id='wa-modal-abt';
+      m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+      document.body.appendChild(m);
     }
-    var items = mensajes.filter(function(m){ return m.tel; });
-    if (!items.length) return; /* no hay números configurados */
-    var btns = items.map(function(m, i){
-      var url = 'https://wa.me/'+m.tel+'?text='+encodeURIComponent(m.msg);
-      return '<a href="'+url+'" target="_blank" style="display:block;background:#25D366;color:#fff;font:bold 16px Barlow,system-ui,sans-serif;text-align:center;padding:14px 20px;border-radius:12px;text-decoration:none;margin-bottom:10px" onclick="_waModalCheck('+i+')">' +
+    return m;
+  }
+
+  /*
+    waObligatorio(mensajes, onConfirm)
+    Muestra el modal con los botones WA.
+    Solo cuando el usuario toca "Confirmar envío" se llama onConfirm().
+    mensajes = [{tel, msg, label}]
+  */
+  window.waObligatorio = function(mensajes, onConfirm){
+    var items = (mensajes||[]).filter(function(m){ return m && m.tel; });
+    if(!items.length){
+      /* no hay números configurados: confirmar directo sin bloquear */
+      if(onConfirm) onConfirm();
+      return;
+    }
+    var modal = _getModal();
+    var enviados = items.map(function(){ return false; });
+
+    var btns = items.map(function(m,i){
+      var url='https://wa.me/'+m.tel+'?text='+encodeURIComponent(m.msg);
+      return '<a href="'+url+'" target="_blank" '+
+        'style="display:block;background:#25D366;color:#fff;font:bold 16px Barlow,system-ui,sans-serif;'+
+        'text-align:center;padding:14px 20px;border-radius:12px;text-decoration:none;margin-bottom:10px" '+
+        'onclick="document.getElementById(\'wa-modal-abt\').dataset.e'+i+'=\'1\'">' +
         '<span style="font-size:20px">&#128172;</span> Enviar a '+m.label+'</a>';
     }).join('');
-    var enviados = new Array(items.length).fill(false);
-    window._waEnviados = enviados;
-    window._waMensajes = items;
-    window._waModalCheck = function(idx){
-      enviados[idx] = true;
-      /* si todos enviados, cerrar */
-      if(enviados.every(function(v){return v;})){
-        setTimeout(function(){ modal.style.display='none'; }, 600);
-      }
-    };
-    modal.innerHTML =
-      '<div style="background:#fff;border-radius:16px;padding:24px 20px;width:100%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.2)">' +
-      '<h3 style="margin:0 0 6px;font-size:18px;color:#8E1B34">&#128172; Avisos de WhatsApp</h3>' +
-      '<p style="margin:0 0 16px;font-size:14px;color:#5E6B7A">Es obligatorio enviar los siguientes mensajes antes de continuar.</p>' +
-      btns +
-      '<button onclick="_waModalForce()" style="display:block;width:100%;margin-top:6px;background:none;border:1px solid #D7DDE5;border-radius:10px;padding:11px;font:14px Barlow,system-ui,sans-serif;color:#5E6B7A;cursor:pointer">Ya los envié &#10003;</button>' +
+
+    modal.innerHTML=
+      '<div style="background:#fff;border-radius:16px;padding:24px 20px;width:100%;max-width:400px;'+
+      'box-shadow:0 8px 32px rgba(0,0,0,.25);box-sizing:border-box">'+
+      '<h3 style="margin:0 0 6px;font-size:18px;color:#8E1B34">&#128172; Enviá los avisos de WhatsApp</h3>'+
+      '<p style="margin:0 0 16px;font-size:14px;color:#5E6B7A">Tocá cada botón para abrir WhatsApp y enviar el mensaje. Después confirmá para guardar.</p>'+
+      btns+
+      '<button id="wa-confirm-btn" onclick="_waConfirm()" '+
+      'style="display:block;width:100%;margin-top:4px;background:#8E1B34;color:#fff;border:none;'+
+      'border-radius:12px;padding:14px;font:bold 16px Barlow,system-ui,sans-serif;cursor:pointer">'+
+      'Confirmar y guardar &#10003;</button>'+
+      '<button onclick="_waCancel()" '+
+      'style="display:block;width:100%;margin-top:8px;background:none;border:1px solid #D7DDE5;'+
+      'border-radius:10px;padding:11px;font:14px Barlow,system-ui,sans-serif;color:#5E6B7A;cursor:pointer">'+
+      'Cancelar</button>'+
       '</div>';
-    modal.style.display = 'flex';
+
+    modal.style.display='flex';
+    modal.dataset.count=items.length;
+    modal._onConfirm=onConfirm;
+
+    window._waConfirm=function(){
+      modal.style.display='none';
+      if(modal._onConfirm) modal._onConfirm();
+      modal._onConfirm=null;
+    };
+    window._waCancel=function(){
+      modal.style.display='none';
+      modal._onConfirm=null;
+      toast('Acción cancelada.');
+    };
   };
 
-  window._waModalForce = function(){
-    var modal = document.getElementById('wa-modal-abt');
-    if(modal) modal.style.display='none';
-  };
-
-  window.waABT = function(msg, labelExtra){
-    var p_ = S.cfg&&S.cfg.params?S.cfg.params:{};
-    var telABT = _telWA(p_.telABT||'');
-    var msgs = [];
-    if (labelExtra && labelExtra.tel) msgs.push(labelExtra);
-    if (telABT) msgs.push({tel:telABT, msg:msg, label:'ABT'});
-    if (msgs.length) window._waModal(msgs);
-  };
-
-  window.waDiscYABT = function(clubes, textoNotif, msgABT){
-    var p_ = S.cfg&&S.cfg.params?S.cfg.params:{};
-    var telABT = _telWA(p_.telABT||'');
-    var msgs = [];
-    (clubes||[]).forEach(function(clubId){
-      var c=(S.cfg.clubes||[]).filter(function(k){return k.id===clubId;})[0];
-      var tel = _telWA(c&&c.tel?c.tel:'');
-      if(tel) msgs.push({tel:tel, msg:waDiscLink(clubId,textoNotif)||'', label:(c?c.nombre:clubId)});
+  /* helper: armar lista de mensajes [club(s) + ABT] */
+  window._waMsgs = function(clubIds, textoClub, textoABT){
+    var p_=S.cfg&&S.cfg.params?S.cfg.params:{};
+    var telABT=_telWA(p_.telABT||'');
+    var msgs=[];
+    (clubIds||[]).forEach(function(id){
+      var c=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0];
+      var tel=_telWA(c&&c.tel?c.tel:'');
+      if(tel) msgs.push({tel:tel, msg:textoClub, label:(c?c.nombre:id)});
     });
-    if(telABT) msgs.push({tel:telABT, msg:msgABT, label:'ABT'});
-    if(msgs.length) window._waModal(msgs);
+    if(telABT) msgs.push({tel:telABT, msg:textoABT, label:'ABT'});
+    return msgs;
   };
 
-  /* parchar guardarNotifPanel */
-  window.guardarNotifPanel = async function(){
-    var ed=S.discEd, clave=S.colegio||(S.abt&&S.abt.clave);
-    var r=await api('disciplina',{clave:clave,notif:ed});
-    if(!r.ok)return toast(r.error,true);
-    S.discEd=null;
-    await(S.abt?cargarDiscABT():cargarDiscColegio()); render();
+  /* ── PARCHES ── */
+
+  /* 1. guardarNotifPanel: mostrar WA ANTES de guardar */
+  window.guardarNotifPanel = function(){
+    var ed=S.discEd;
+    if(!ed||!ed.texto||!ed.texto.trim()) return toast('Escribí el texto de la notificación.',true);
+    var clave=S.colegio||(S.abt&&S.abt.clave);
     var nl=String.fromCharCode(10);
-    var emisor=S.abt?'ABT':'Colegio de Arbitros';
-    var clubes=(r.notif.clubes||[]).map(function(id){var c=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0];return c?c.nombre:id;}).join(', ');
-    var msgABT='[Disciplina ABT]'+nl+'Informe - '+emisor+nl+'Club/s: '+clubes+nl+'Texto: '+r.notif.texto;
-    waDiscYABT(r.notif.clubes, r.notif.texto, msgABT);
-    toast('Notificacion guardada.');
+    var emisor=S.abt?'ABT':'Colegio de Árbitros';
+    /* construir mensajes */
+    var clubIds=ed.clubes||[];
+    var clubes=clubIds.map(function(id){var c=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0];return c?c.nombre:id;}).join(', ');
+    var msgClub='\u2696\uFE0F Notificación del Tribunal de Disciplina'+nl+
+      'Club: '+clubes+nl+
+      'Informe: '+ed.texto.trim()+nl+
+      'Tenés 72 horas hábiles (lun-vie 8-20) para presentar el descargo en la app.'+nl+
+      'Accedé en: https://scbasquet.github.io/cronograma-y-designaciones/';
+    var msgABT='[Disciplina ABT]'+nl+'Informe - '+emisor+nl+'Club/s: '+clubes+nl+'Texto: '+ed.texto.trim();
+    var msgs=window._waMsgs(clubIds, msgClub, msgABT);
+    waObligatorio(msgs, async function(){
+      var r=await api('disciplina',{clave:clave,notif:ed});
+      if(!r.ok)return toast(r.error,true);
+      S.discEd=null;
+      toast('Notificación guardada.');
+      await(S.abt?cargarDiscABT():cargarDiscColegio()); render();
+    });
   };
 
-  /* parchar enviarDescargo */
+  /* 2. enviarDescargo: mostrar WA ANTES de guardar */
   window.enviarDescargo = async function(notifId){
     var txt=(S.descEd&&S.descEd.texto||'').trim();
-    if(!txt)return toast('Escribi el texto del descargo.',true);
-    var r=await api('descargo',{club:S.club.id,pin:S.club.pin,notifId:notifId,texto:txt});
-    if(!r.ok)return toast(r.error,true);
-    S.descEd=null; cargar();
+    if(!txt)return toast('Escribí el texto del descargo.',true);
     var nl=String.fromCharCode(10);
     var club=(S.cfg.clubes||[]).filter(function(c){return c.id===S.club.id;})[0];
+    var p_=S.cfg&&S.cfg.params?S.cfg.params:{};
+    var telABT=_telWA(p_.telABT||'');
+    var telHTD=_telWA(p_.telHTD||'');
     var msgABT='[Disciplina ABT]'+nl+'Descargo presentado'+nl+'Club: '+(club?club.nombre:S.club.id)+nl+'Texto: '+txt;
-    waABT(msgABT);
-    toast('Descargo enviado.');
+    var msgs=[];
+    if(telABT) msgs.push({tel:telABT, msg:msgABT, label:'ABT'});
+    if(telHTD) msgs.push({tel:telHTD, msg:msgABT, label:'HTD'});
+    waObligatorio(msgs, async function(){
+      var r=await api('descargo',{club:S.club.id,pin:S.club.pin,notifId:notifId,texto:txt});
+      if(!r.ok)return toast(r.error,true);
+      S.descEd=null; toast('Descargo enviado.'); cargar();
+    });
   };
 
-  /* parchar guardarResolucion */
+  /* 3. guardarResolucion: mostrar WA ANTES de guardar */
   window.guardarResolucion = async function(notifId){
     var ed=S.htdEd; if(!ed)return;
-    var txt=(ed.texto||'').trim(); if(!txt)return toast('Escribi el texto de la resolucion.',true);
-    var r=await api('resolucion',{clave:S.htdClave,notifId:notifId,texto:txt,estado:ed.estado||'en proceso'});
-    if(!r.ok)return toast(r.error,true);
-    S.htdEd=null;
+    var txt=(ed.texto||'').trim(); if(!txt)return toast('Escribí el texto de la resolución.',true);
     var nl=String.fromCharCode(10);
-    var est=r.notif&&r.notif.resolucion?r.notif.resolucion.estado:'actualizado';
-    var msgABT='[Disciplina ABT]'+nl+'Resolucion del HTD'+nl+'Estado: '+est;
-    /* notif al club */
-    var clubes=r.notif?r.notif.clubes:[];
-    waDiscYABT(clubes,'Resolucion del HTD: '+est+'. '+txt, msgABT);
-    toast('Resolucion guardada.');
-    await recargarHTD(); render();
+    var est=ed.estado||'en proceso';
+    /* buscar clubes de la notif */
+    var notif=(S.htd||[]).filter(function(n){return n.id===notifId;})[0];
+    var clubIds=notif?notif.clubes:[];
+    var clubes=clubIds.map(function(id){var c=(S.cfg.clubes||[]).filter(function(k){return k.id===id;})[0];return c?c.nombre:id;}).join(', ');
+    var msgClub='\u2696\uFE0F Resolución del Tribunal de Disciplina'+nl+
+      'Club: '+clubes+nl+
+      'Estado: '+est+nl+
+      'Resolución: '+txt;
+    var msgABT='[Disciplina ABT]'+nl+'Resolución del HTD'+nl+'Estado: '+est+nl+'Club/s: '+clubes;
+    var msgs=window._waMsgs(clubIds, msgClub, msgABT);
+    waObligatorio(msgs, async function(){
+      var r=await api('resolucion',{clave:S.htdClave,notifId:notifId,texto:txt,estado:est});
+      if(!r.ok)return toast(r.error,true);
+      S.htdEd=null; toast('Resolución guardada.');
+      await recargarHTD(); render();
+    });
   };
 
-  /* parchar _enviarTira */
+  /* 4. _enviarTira: WA a la ABT DESPUÉS de guardar (no bloquea) */
   var _pti=setInterval(function(){
     if(!window._enviarTira)return;
     clearInterval(_pti);
@@ -1925,6 +1970,9 @@ document.addEventListener('visibilitychange', function(){ if (!document.hidden &
       var snap=JSON.parse(JSON.stringify(S.edit||{}));
       await _o.call(this,motivo);
       var nl=String.fromCharCode(10);
+      var p_=S.cfg&&S.cfg.params?S.cfg.params:{};
+      var telABT=_telWA(p_.telABT||'');
+      if(!telABT)return;
       var club=(S.cfg.clubes||[]).filter(function(c){return c.id===snap.local;})[0];
       var rival=snap.rivalId?(S.cfg.clubes||[]).filter(function(c){return c.id===snap.rivalId;})[0]:null;
       var cats=(snap.partidos||[]).map(function(x){return x.hora+' '+x.cat;}).join(', ');
@@ -1933,7 +1981,9 @@ document.addEventListener('visibilitychange', function(){ if (!document.hidden &
         'Fecha: '+(snap.fecha?fechaLarga(snap.fecha):'')+' / '+(snap.sede||'')+nl+
         'Partidos: '+cats;
       if(snap.id&&snap._motivo)msg+=nl+'Motivo: '+snap._motivo;
-      waABT(msg);
+      /* para la tira: no obligatorio, solo abrir WA si hay número */
+      var url='https://wa.me/'+telABT+'?text='+encodeURIComponent(msg);
+      setTimeout(function(){window.open(url,'_blank');},700);
     };
   },200);
 
