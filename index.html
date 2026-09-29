@@ -162,7 +162,7 @@ nav.tabs button.on{color:var(--tabla);box-shadow:inset 0 4px 0 var(--tabla)}
 <script>
 /* Pegá acá la URL /exec del Apps Script. Vacía = modo demo (los datos viven solo en esta pestaña). */
 var API_URL = 'https://script.google.com/macros/s/AKfycbzsgxWcwIQ4VzF5pUTl4ETrJJHDvc-bJy57eB23Px5fdaLxKrZtUZaqxMnV-_ISfLuN8A/exec';
-var VERSION = 'v3.9';
+var VERSION = 'v3.10';
 
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
 /* ===== NÚCLEO COMPARTIDO — es idéntico en index.html y en Code.gs ===== */
@@ -211,7 +211,7 @@ function cierreTira(t, P){
 function cierreDe(sab, P){ var dia = Number(P.cierreDia); if (!(dia >= 0 && dia <= 6)) dia = 4; return addDias(sab, -((6 - dia + 7) % 7)) + 'T' + (P.cierreHora || '20:00'); }
 function mins(h){ var a = String(h).split(':'); return (+a[0])*60 + (+a[1]); }
 function uid(){ return Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
-function paramsDe(cfg){ var P = {}, k, c = cfg.params || {}; for (k in DEF_PARAMS) P[k] = DEF_PARAMS[k]; for (k in c) if (c[k] !== '' && c[k] != null) P[k] = c[k]; return P; }
+function paramsDe(cfg){ var P = {}, k, c = cfg.params || {}; for (k in DEF_PARAMS) P[k] = DEF_PARAMS[k]; for (k in c) if ((c[k] !== '' || k === 'emailABT' || k === 'telABT' || k === 'telHTD') && c[k] != null) P[k] = c[k]; return P; }
 function totalTira(t, cfg, P){
   var n = Number(P.arbitrosPorPartido) || 2, s = 0;
   (t.partidos || []).forEach(function(x){
@@ -674,6 +674,8 @@ function guardarConfig_(p, S, cfg, esABT){
   if (parte === 'params'){
     var np = {};
     for (var k in DEF_PARAMS) np[k] = (v && v[k] !== undefined && v[k] !== '') ? v[k] : P[k];
+    /* campos opcionales: se pueden cambiar o dejar vacios */
+    ['emailABT','telABT','telHTD'].forEach(function(k){ if (v && v[k] !== undefined) np[k] = String(v[k] == null ? '' : v[k]).trim(); });
     ['arbitrosPorPartido','cierreDia','minEntrePartidos','extraCambioSede','anticipacionHoras','duracionMin','horasAviso'].forEach(function(k){
       np[k] = Number(np[k]); if (isNaN(np[k]) || np[k] < 0) err('Revisá los números de las reglas.');
     });
